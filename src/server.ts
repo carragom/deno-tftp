@@ -890,7 +890,10 @@ function buildOackOptions(
 		oack.windowsize = options.windowsize
 	}
 	if (request.options.tsize !== undefined) {
-		oack.tsize = response.options?.tsize ?? request.options.tsize
+		const tsize = response.options?.tsize ?? request.options.tsize
+		if (!(request.method === 'GET' && request.mode === 'netascii')) {
+			oack.tsize = tsize
+		}
 	}
 	return oack
 }

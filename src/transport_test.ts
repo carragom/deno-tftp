@@ -236,6 +236,89 @@ Deno.test('server OACK only includes options requested by the client', async () 
 	}
 })
 
+Deno.test('server omits tsize from netascii RRQ OACK', async () => {
+	const root = await Deno.makeTempDir()
+	await Deno.writeTextFile(`${root}/hello.txt`, 'hello\n')
+	const server = new Server(undefined, {
+		host: '127.0.0.1',
+		port: 1109,
+		root,
+	})
+	await server.listen()
+	const socket = Deno.listenDatagram({
+		transport: 'udp',
+		hostname: '0.0.0.0',
+		port: 0,
+	})
+	try {
+		await socket.send(
+			encodeRequestPacket(createRequest('GET', 'hello.txt', {
+				mode: 'netascii',
+				options: { tsize: 0 },
+			})),
+			{ transport: 'udp', hostname: '127.0.0.1', port: 1109 },
+		)
+		const [packet, addr] = await receiveDatagram(socket)
+		const remote = addr as UdpAddr
+		const oack = decodeOptionsAckPacket(packet)
+		assertEquals(oack.options.tsize, undefined)
+
+		await socket.send(encodeAckPacket(0), toSendAddr(remote))
+		const [dataPacket] = await receiveDatagram(socket)
+		assertEquals(
+			new TextDecoder().decode(decodeDataPacket(dataPacket).data),
+			'hello\r\n',
+		)
+	} finally {
+		socket.close()
+		await server.close()
+	}
+})
+
+Deno.test('server rejects malformed RRQ missing mode terminator', async () => {
+	const server = new Server(undefined, { host: '127.0.0.1', port: 1113 })
+	await server.listen()
+	const socket = Deno.listenDatagram({
+		transport: 'udp',
+		hostname: '0.0.0.0',
+		port: 0,
+	})
+	try {
+		await socket.send(
+			new Uint8Array([0, 1, 102, 111, 111, 0, 111, 99, 116, 101, 116]),
+			{ transport: 'udp', hostname: '127.0.0.1', port: 1113 },
+		)
+		const [packet] = await receiveDatagram(socket)
+		const error = decodeErrorPacket(packet)
+		assertEquals(error.code, TFTPErrorCode.ILLEGAL_OPERATION)
+	} finally {
+		socket.close()
+		await server.close()
+	}
+})
+
+Deno.test('server rejects malformed RRQ missing transfer mode', async () => {
+	const server = new Server(undefined, { host: '127.0.0.1', port: 1114 })
+	await server.listen()
+	const socket = Deno.listenDatagram({
+		transport: 'udp',
+		hostname: '0.0.0.0',
+		port: 0,
+	})
+	try {
+		await socket.send(
+			new Uint8Array([0, 1, 102, 111, 111, 0]),
+			{ transport: 'udp', hostname: '127.0.0.1', port: 1114 },
+		)
+		const [packet] = await receiveDatagram(socket)
+		const error = decodeErrorPacket(packet)
+		assertEquals(error.code, TFTPErrorCode.ILLEGAL_OPERATION)
+	} finally {
+		socket.close()
+		await server.close()
+	}
+})
+
 Deno.test('client and server can transfer windowed PUT data', async () => {
 	const root = await Deno.makeTempDir()
 	const server = new Server(undefined, {
