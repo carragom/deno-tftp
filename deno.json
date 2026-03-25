@@ -1,0 +1,12 @@
+{
+  "name": "deno-tftp",
+  "version": "0.1.0",
+  "exports": "./mod.ts",
+  "tasks": {
+    "test": "deno test -P"
+  },
+  "license": "MIT",
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1"
+  }
+}
