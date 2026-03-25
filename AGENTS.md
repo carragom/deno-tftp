@@ -93,13 +93,15 @@ Integration-only test file:
 
 Interop gating rules:
 
-- `TEST_INTEROP_CLIENT=atftp|tftp` enables tests that drive this server using an
-  external CLI client
-- `TEST_INTEROP_SERVER=<host>[:port]` enables tests that drive an external TFTP
-  server using this client
-- If `TEST_INTEROP_SERVER` omits a port, use port `69`
-- Do not prevalidate external client availability; let the configured test fail
-  naturally if the command is missing
+- `TEST_INTEROP_CLIENT=y|yes` enables tests that drive this server using
+  external CLI clients found in `PATH`
+- When enabled, run separate interop test sets for `atftp` and `tftp` if each
+  binary exists
+- `TEST_INTEROP_SERVER=<host>[:port][,<host>[:port]...]` enables tests that
+  drive one or more external TFTP servers using this client
+- If a `TEST_INTEROP_SERVER` entry omits a port, use port `69`
+- Prefer `atftp` for broader option-negotiation coverage because it exposes RFC
+  options directly via `--option "name value"`
 
 Test split guidance:
 

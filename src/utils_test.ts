@@ -8,6 +8,7 @@ import {
 	normalizeServerOptions,
 	normalizeTFTPPath,
 	parseInteropServer,
+	parseInteropServers,
 	parseTFTPUri,
 	resolvePutTarget,
 	resolveReadPath,
@@ -35,6 +36,13 @@ Deno.test('parseInteropServer defaults port 69', () => {
 		host: '127.0.0.1',
 		port: 69,
 	})
+})
+
+Deno.test('parseInteropServers supports comma-separated targets', () => {
+	assertEquals(parseInteropServers('127.0.0.1,example.com:1069'), [
+		{ host: '127.0.0.1', port: 69 },
+		{ host: 'example.com', port: 1069 },
+	])
 })
 
 Deno.test('normalize client and server options apply defaults', () => {

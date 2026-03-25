@@ -212,6 +212,12 @@ export function parseInteropServer(
 	return { host: parts.join(':'), port }
 }
 
+export function parseInteropServers(
+	value: string,
+): Array<{ host: string; port: number }> {
+	return value.split(',').map((entry) => parseInteropServer(entry.trim()))
+}
+
 export async function canonicalizeRoot(root: string): Promise<string> {
 	const resolved = resolve(root)
 	const stat = await Deno.lstat(resolved)

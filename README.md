@@ -166,23 +166,34 @@ unknown transfer IDs, and transfer-size mismatch handling.
 
 Optional interoperability tests are enabled with environment variables:
 
-- `TEST_INTEROP_CLIENT=atftp|tftp` enables tests that drive this server with an
-  external TFTP client
-- `TEST_INTEROP_SERVER=<host>[:port]` enables tests that drive an external TFTP
-  server with this client
+- `TEST_INTEROP_CLIENT=y|yes` enables tests that drive this server with external
+  TFTP clients found in `PATH`
+- `TEST_INTEROP_SERVER=<host>[:port][,<host>[:port]...]` enables tests that
+  drive one or more external TFTP servers with this client
 
-If `TEST_INTEROP_SERVER` omits a port, port `69` is used. The external server
-fixture is expected to expose a readable `hello.txt` file containing `hello\n`.
+If a `TEST_INTEROP_SERVER` entry omits a port, port `69` is used. The external
+server fixture is expected to expose a readable `hello.txt` file containing
+`hello\n`.
+
+When `TEST_INTEROP_CLIENT` is enabled, the suite runs separate client interop
+tests for `atftp` and `tftp` when those binaries are available in `PATH`.
+`atftp` also covers negotiated server options such as `blksize`, `timeout`,
+`windowsize`, and `tsize`.
 
 Examples:
 
 ```sh
-TEST_INTEROP_CLIENT=atftp deno test -P src/integration_test.ts
-TEST_INTEROP_SERVER=127.0.0.1:1069 deno test -P src/integration_test.ts
+TEST_INTEROP_CLIENT=yes deno test -P src/integration_test.ts
+TEST_INTEROP_SERVER=127.0.0.1:1069,127.0.0.1:2069 deno test -P src/integration_test.ts
 ```
 
 When `TEST_INTEROP_SERVER` is set, the integration suite also checks negotiated
-`blksize`, `windowsize`, and `tsize` behavior against the external server.
+`blksize`, `windowsize`, and `tsize` behavior against each configured external
+server.
 
 When `TEST_INTEROP_CLIENT` is set, the integration suite checks both download
 and upload against this server using a temporary writable root.
+
+GitHub Actions installs `atftp`, `atftpd`, and `tftp-hpa`. CI runs the main test
+suite, drives `atftpd` as an external server, and drives this server with both
+`atftp` and `tftp` when those clients are present.

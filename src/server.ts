@@ -40,8 +40,8 @@ import {
 } from './utils.ts'
 import type { NormalizedServerOptions } from './utils.ts'
 
-type UdpConn = Deno.DatagramConn
 type UdpAddr = Deno.NetAddr & { transport: 'udp' }
+type UdpConn = Deno.DatagramConn & { addr: UdpAddr }
 
 interface NegotiatedTransferOptions {
 	blksize: number
@@ -72,14 +72,14 @@ export class Server {
 
 	get host(): string {
 		if (this.#socket) {
-			return (this.#socket.addr as Deno.NetAddr).hostname
+			return this.#socket.addr.hostname
 		}
 		return this.#options.host
 	}
 
 	get port(): number {
 		if (this.#socket) {
-			return (this.#socket.addr as Deno.NetAddr).port
+			return this.#socket.addr.port
 		}
 		return this.#options.port
 	}
@@ -122,7 +122,7 @@ export class Server {
 			transport: 'udp',
 			hostname: this.#options.host,
 			port: this.#options.port,
-		})
+		}) as UdpConn
 		this.#listening = true
 		this.#loop = this.#acceptLoop()
 	}
@@ -280,7 +280,7 @@ export class Server {
 			transport: 'udp',
 			hostname: this.#options.host,
 			port: 0,
-		})
+		}) as UdpConn
 
 		const request = createRequest(parsed.method, parsed.path, {
 			mode: parsed.mode,
