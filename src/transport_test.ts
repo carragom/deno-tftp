@@ -20,6 +20,10 @@ import { streamFromBytes } from './utils.ts'
 
 type UdpAddr = Deno.NetAddr & { transport: 'udp' }
 
+const TEST_TIMEOUT_MS = 200
+const TEST_TIMEOUT_SECONDS = 1
+const TEST_RETRIES = 1
+
 Deno.test('client rejects server OACK that increases requested windowsize', async () => {
 	const server = new Server(
 		() => ({
@@ -34,6 +38,8 @@ Deno.test('client rejects server OACK that increases requested windowsize', asyn
 			host: '127.0.0.1',
 			port: 1093,
 			windowSize: 4,
+			timeout: TEST_TIMEOUT_MS,
+			retries: TEST_RETRIES,
 		})
 		await assertRejects(() => client.get('bad.txt'))
 	} finally {
@@ -44,7 +50,13 @@ Deno.test('client rejects server OACK that increases requested windowsize', asyn
 Deno.test('server returns unknown transfer id error to unexpected peer', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1094, root })
+	const server = new Server(undefined, {
+		host: '127.0.0.1',
+		port: 1094,
+		root,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
+	})
 	await server.listen()
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
@@ -156,7 +168,13 @@ Deno.test('server rejects forged DATA to listening port with illegal operation',
 Deno.test('server ignores short malformed packets without crashing accept loop', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1106, root })
+	const server = new Server(undefined, {
+		host: '127.0.0.1',
+		port: 1106,
+		root,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
+	})
 	await server.listen()
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
@@ -202,6 +220,8 @@ Deno.test('server OACK only includes options requested by the client', async () 
 		root,
 		blockSize: 1024,
 		windowSize: 8,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
 	})
 	await server.listen()
 	const socket = Deno.listenDatagram({
@@ -243,6 +263,8 @@ Deno.test('server omits tsize from netascii RRQ OACK', async () => {
 		host: '127.0.0.1',
 		port: 1109,
 		root,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
 	})
 	await server.listen()
 	const socket = Deno.listenDatagram({
@@ -328,6 +350,8 @@ Deno.test('client and server can transfer windowed PUT data', async () => {
 		allowCreateDir: true,
 		blockSize: 1024,
 		windowSize: 4,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
 	})
 	await server.listen()
 	try {
@@ -336,6 +360,8 @@ Deno.test('client and server can transfer windowed PUT data', async () => {
 			port: 1095,
 			blockSize: 1024,
 			windowSize: 4,
+			timeout: TEST_TIMEOUT_MS,
+			retries: TEST_RETRIES,
 		})
 		const payload = 'upload-'.repeat(400)
 		await client.put(
@@ -361,6 +387,8 @@ Deno.test('client PUT advances after partial window ACK', async () => {
 			port: 1096,
 			blockSize: 8,
 			windowSize: 4,
+			timeout: TEST_TIMEOUT_MS,
+			retries: TEST_RETRIES,
 		})
 
 		const putPromise = client.put('partial.txt', streamFromBytes(payload))
@@ -376,7 +404,7 @@ Deno.test('client PUT advances after partial window ACK', async () => {
 			encodeOptionsAckPacket({
 				blksize: 8,
 				windowsize: 4,
-				timeout: 3,
+				timeout: TEST_TIMEOUT_SECONDS,
 				tsize: payload.length,
 			}),
 			toSendAddr(remote),
@@ -405,6 +433,8 @@ Deno.test('client and server handle block rollover for PUT data', async () => {
 		root,
 		blockSize: 8,
 		windowSize: 1,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
 	})
 	await server.listen()
 	try {
@@ -413,6 +443,8 @@ Deno.test('client and server handle block rollover for PUT data', async () => {
 			port: 1105,
 			blockSize: 8,
 			windowSize: 1,
+			timeout: TEST_TIMEOUT_MS,
+			retries: TEST_RETRIES,
 		})
 		const payload = new Uint8Array(8 * 65536)
 		for (let index = 0; index < payload.length; index++) {
@@ -436,6 +468,8 @@ Deno.test('server ignores duplicate old ACK after partial window ACK', async () 
 		root,
 		blockSize: 8,
 		windowSize: 4,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
 	})
 	await server.listen()
 	const socket = Deno.listenDatagram({
@@ -485,7 +519,8 @@ Deno.test('server resends tail of GET window after partial ACK and timeout', asy
 		root,
 		blockSize: 8,
 		windowSize: 4,
-		timeout: 200,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
 	})
 	await server.listen()
 	const socket = Deno.listenDatagram({
@@ -530,6 +565,8 @@ Deno.test('server ACKs last good block for duplicate and out-of-order PUT data',
 		root,
 		blockSize: 8,
 		windowSize: 4,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
 	})
 	await server.listen()
 	const socket = Deno.listenDatagram({
@@ -587,6 +624,8 @@ Deno.test('server re-ACKs last committed PUT block after hole in window', async 
 		root,
 		blockSize: 8,
 		windowSize: 4,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
 	})
 	await server.listen()
 	const socket = Deno.listenDatagram({
@@ -647,7 +686,8 @@ Deno.test('server resends final ACK when last WRQ data block is retransmitted', 
 		root,
 		blockSize: 8,
 		windowSize: 1,
-		timeout: 200,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
 	})
 	await server.listen()
 	const socket = Deno.listenDatagram({
@@ -688,6 +728,8 @@ Deno.test('server rejects PUT body larger than declared tsize', async () => {
 		root,
 		blockSize: 8,
 		windowSize: 4,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
 	})
 	await server.listen()
 	const socket = Deno.listenDatagram({
@@ -735,6 +777,8 @@ Deno.test('client ACKs last good block for duplicate and out-of-order GET data',
 			port: 1100,
 			blockSize: 8,
 			windowSize: 4,
+			timeout: TEST_TIMEOUT_MS,
+			retries: TEST_RETRIES,
 		})
 
 		const getPromise = client.get('dup.txt')
@@ -748,7 +792,7 @@ Deno.test('client ACKs last good block for duplicate and out-of-order GET data',
 			encodeOptionsAckPacket({
 				blksize: 8,
 				windowsize: 4,
-				timeout: 3,
+				timeout: TEST_TIMEOUT_SECONDS,
 				tsize: 12,
 			}),
 			toSendAddr(remote),
@@ -799,8 +843,8 @@ Deno.test('client re-ACKs old GET block after dropped tail of window', async () 
 			port: 1112,
 			blockSize: 8,
 			windowSize: 4,
-			timeout: 200,
-			retries: 2,
+			timeout: TEST_TIMEOUT_MS,
+			retries: TEST_RETRIES,
 		})
 
 		const getPromise = client.get('drop.txt')
@@ -813,7 +857,7 @@ Deno.test('client re-ACKs old GET block after dropped tail of window', async () 
 			encodeOptionsAckPacket({
 				blksize: 8,
 				windowsize: 4,
-				timeout: 1,
+				timeout: TEST_TIMEOUT_SECONDS,
 				tsize: 28,
 			}),
 			toSendAddr(remote),
@@ -837,7 +881,7 @@ Deno.test('client re-ACKs old GET block after dropped tail of window', async () 
 			toSendAddr(remote),
 		)
 		assertEquals(
-			decodeAckPacket((await receiveDatagram(socket, 1500))[0]).block,
+			decodeAckPacket((await receiveDatagram(socket, 800))[0]).block,
 			3,
 		)
 
@@ -846,7 +890,7 @@ Deno.test('client re-ACKs old GET block after dropped tail of window', async () 
 			toSendAddr(remote),
 		)
 		assertEquals(
-			decodeAckPacket((await receiveDatagram(socket, 1500))[0]).block,
+			decodeAckPacket((await receiveDatagram(socket, 800))[0]).block,
 			4,
 		)
 
@@ -855,7 +899,7 @@ Deno.test('client re-ACKs old GET block after dropped tail of window', async () 
 			toSendAddr(remote),
 		)
 		assertEquals(
-			decodeAckPacket((await receiveDatagram(socket, 1500))[0]).block,
+			decodeAckPacket((await receiveDatagram(socket, 800))[0]).block,
 			5,
 		)
 
@@ -881,6 +925,8 @@ Deno.test('client ignores out-of-order GET data before first valid block', async
 			port: 1101,
 			blockSize: 8,
 			windowSize: 4,
+			timeout: TEST_TIMEOUT_MS,
+			retries: TEST_RETRIES,
 		})
 
 		const getPromise = client.get('order.txt')
@@ -893,7 +939,7 @@ Deno.test('client ignores out-of-order GET data before first valid block', async
 			encodeOptionsAckPacket({
 				blksize: 8,
 				windowsize: 4,
-				timeout: 3,
+				timeout: TEST_TIMEOUT_SECONDS,
 				tsize: 7,
 			}),
 			toSendAddr(remote),
