@@ -2,6 +2,8 @@ import { assertEquals, assertRejects, assertThrows } from '@std/assert'
 
 import {
 	canonicalizeRoot,
+	decodeNetascii,
+	encodeNetascii,
 	normalizeClientOptions,
 	normalizeServerOptions,
 	normalizeTFTPPath,
@@ -54,4 +56,65 @@ Deno.test('resolvePutTarget validates nearest existing parent', async () => {
 	const canonical = await canonicalizeRoot(root)
 	const resolved = await resolvePutTarget(canonical, 'nested/file.txt')
 	assertEquals(resolved.relativePath, 'nested/file.txt')
+})
+
+Deno.test('netascii encoding follows CRLF and CRNUL rules', () => {
+	const input = new Uint8Array([
+		0x66,
+		0x6f,
+		0x6f,
+		0x0a,
+		0x62,
+		0x61,
+		0x72,
+		0x0d,
+		0x62,
+		0x61,
+		0x7a,
+		0x0a,
+	])
+	assertEquals(
+		Array.from(encodeNetascii(input)),
+		[
+			0x66,
+			0x6f,
+			0x6f,
+			0x0d,
+			0x0a,
+			0x62,
+			0x61,
+			0x72,
+			0x0d,
+			0x00,
+			0x62,
+			0x61,
+			0x7a,
+			0x0d,
+			0x0a,
+		],
+	)
+})
+
+Deno.test('netascii decoding restores local bytes', () => {
+	const input = new Uint8Array([
+		0x66,
+		0x6f,
+		0x6f,
+		0x0d,
+		0x0a,
+		0x62,
+		0x61,
+		0x72,
+		0x0d,
+		0x00,
+		0x62,
+		0x61,
+		0x7a,
+		0x0d,
+		0x0a,
+	])
+	assertEquals(
+		Array.from(decodeNetascii(input)),
+		[0x66, 0x6f, 0x6f, 0x0a, 0x62, 0x61, 0x72, 0x0d, 0x62, 0x61, 0x7a, 0x0a],
+	)
 })

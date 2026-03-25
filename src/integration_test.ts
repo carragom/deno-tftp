@@ -105,6 +105,52 @@ Deno.test('client and server handle concurrent WRQ in-process', async () => {
 	}
 })
 
+Deno.test('client and server translate netascii on GET in-process', async () => {
+	const root = await Deno.makeTempDir()
+	await Deno.writeTextFile(`${root}/unix.txt`, 'foo\nbar\rbaz\n')
+
+	const server = new Server(undefined, { host: '127.0.0.1', port: 1087, root })
+	await server.listen()
+	try {
+		const client = new Client({
+			host: '127.0.0.1',
+			port: 1087,
+			blockSize: 64,
+		})
+		const response = await client.get('unix.txt', { mode: 'netascii' })
+		assertEquals(
+			new TextDecoder().decode(await readBodyToBytes(response.body)),
+			'foo\nbar\rbaz\n',
+		)
+	} finally {
+		await server.close()
+	}
+})
+
+Deno.test('client and server translate netascii on PUT in-process', async () => {
+	const root = await Deno.makeTempDir()
+	const server = new Server(undefined, { host: '127.0.0.1', port: 1086, root })
+	await server.listen()
+	try {
+		const client = new Client({
+			host: '127.0.0.1',
+			port: 1086,
+			blockSize: 64,
+		})
+		await client.put(
+			'unix.txt',
+			streamFromBytes(new TextEncoder().encode('foo\nbar\rbaz\n')),
+			{ mode: 'netascii' },
+		)
+		assertEquals(
+			await Deno.readTextFile(`${root}/unix.txt`),
+			'foo\nbar\rbaz\n',
+		)
+	} finally {
+		await server.close()
+	}
+})
+
 Deno.test('client interop tests are gated by TEST_INTEROP_SERVER', () => {
 	const value = Deno.env.get('TEST_INTEROP_SERVER')
 	if (!value) {

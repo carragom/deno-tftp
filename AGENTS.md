@@ -21,6 +21,16 @@ The implementation targets:
 - RFC 3617
 - RFC 7440
 
+Out of scope unless explicitly requested:
+
+- multicast / MTFTP
+- non-standard rollover option negotiation
+
+Current rollover behavior:
+
+- default block number wrap is `65535 -> 0`
+- do not advertise rollover support automatically
+
 Reference texts live in `docs/`.
 
 ## Server Dispatch Order
@@ -69,12 +79,13 @@ Protocol-oriented error expectations:
 
 ## Tests
 
-Unit-only test files:
+Unit and focused transport test files:
 
 - `src/client_test.ts`
 - `src/server_test.ts`
 - `src/common_test.ts`
 - `src/utils_test.ts`
+- `src/transport_test.ts`
 
 Integration-only test file:
 
@@ -89,6 +100,14 @@ Interop gating rules:
 - If `TEST_INTEROP_SERVER` omits a port, use port `69`
 - Do not prevalidate external client availability; let the configured test fail
   naturally if the command is missing
+
+Test split guidance:
+
+- keep `src/transport_test.ts` for wire-level UDP / protocol edge cases
+- keep `src/client_test.ts` and `src/server_test.ts` for higher-level API
+  behavior
+- keep `src/integration_test.ts` for in-process integration and env-gated
+  external interop
 
 ## CLI
 

@@ -20,6 +20,7 @@ import type {
 	ServerOptions,
 	TFTPError,
 	TFTPHandler,
+	TFTPOptions,
 	TFTPRequest,
 	TFTPResponse,
 	TFTPRoute,
@@ -28,6 +29,8 @@ import type {
 import {
 	assertInsideRoot,
 	canonicalizeRoot,
+	decodeNetascii,
+	encodeNetascii,
 	normalizeServerOptions,
 	normalizeTFTPPath,
 	readBodyToBytes,
@@ -234,7 +237,7 @@ export class Server {
 
 			const [packet, addr] = received
 			const remote = addr as UdpAddr
-			const opcode = readOpcode(packet)
+			const opcode = packet.length >= 2 ? readOpcode(packet) : -1
 			if (opcode !== TFTPOpcode.RRQ && opcode !== TFTPOpcode.WRQ) {
 				await sendPacket(
 					socket,
@@ -330,14 +333,10 @@ export class Server {
 		if (shouldSendOack(request)) {
 			await sendPacket(
 				socket,
-				encodeOptionsAckPacket({
-					blksize: options.blksize,
-					timeout: Math.max(1, Math.floor(options.timeoutMs / 1000)),
-					windowsize: options.windowsize,
-					...(response.options?.tsize !== undefined
-						? { tsize: response.options.tsize }
-						: {}),
-				}, response.extensions ?? {}),
+				encodeOptionsAckPacket(
+					buildOackOptions(request, response, options),
+					response.extensions ?? {},
+				),
 				remote,
 			)
 			const ack0 = await receiveFrom(socket, remote, options.timeoutMs)
@@ -354,7 +353,10 @@ export class Server {
 		await sendDataWindows(
 			socket,
 			remote,
-			splitIntoBlocks(data, options.blksize),
+			splitIntoBlocks(
+				request.mode === 'netascii' ? encodeNetascii(data) : data,
+				options.blksize,
+			),
 			options,
 			this.#options.retries,
 		)
@@ -375,14 +377,10 @@ export class Server {
 		if (shouldSendOack(request)) {
 			await sendPacket(
 				socket,
-				encodeOptionsAckPacket({
-					blksize: options.blksize,
-					timeout: Math.max(1, Math.floor(options.timeoutMs / 1000)),
-					windowsize: options.windowsize,
-					...(response.options?.tsize !== undefined
-						? { tsize: response.options.tsize }
-						: {}),
-				}, response.extensions ?? {}),
+				encodeOptionsAckPacket(
+					buildOackOptions(request, response, options),
+					response.extensions ?? {},
+				),
 				remote,
 			)
 		} else {
@@ -395,8 +393,18 @@ export class Server {
 			options,
 			request.options.tsize,
 		)
-		await this.#persistPutData(request.path, data.data, request.options.tsize)
+		await this.#persistPutData(
+			request.path,
+			request.mode === 'netascii' ? decodeNetascii(data.data) : data.data,
+			request.options.tsize,
+		)
 		await sendPacket(socket, encodeAckPacket(data.lastBlock), remote)
+		await resendFinalAckIfNeeded(
+			socket,
+			remote,
+			data.lastBlock,
+			options,
+		)
 	}
 
 	async #persistPutData(
@@ -657,6 +665,50 @@ async function receiveDataWindows(
 	}
 }
 
+async function resendFinalAckIfNeeded(
+	socket: UdpConn,
+	remote: UdpAddr,
+	lastBlock: number,
+	options: NegotiatedTransferOptions,
+): Promise<void> {
+	while (true) {
+		const reply = await receiveWithDeadline(
+			socket.receive(),
+			options.timeoutMs,
+		)
+		if (!reply) {
+			return
+		}
+
+		const [packet, addr] = reply
+		const replyAddr = addr as UdpAddr
+		if (
+			replyAddr.hostname !== remote.hostname ||
+			replyAddr.port !== remote.port
+		) {
+			await sendPacket(
+				socket,
+				encodeErrorPacket(
+					createTFTPError(TFTPErrorCode.UNKNOWN_TRANSFER_ID),
+				),
+				replyAddr,
+			)
+			continue
+		}
+
+		if (readOpcode(packet) === TFTPOpcode.ERROR) {
+			return
+		}
+
+		const dataPacket = decodeDataPacket(packet, options.blksize)
+		if (dataPacket.block === lastBlock) {
+			await sendPacket(socket, encodeAckPacket(lastBlock), remote)
+			continue
+		}
+		return
+	}
+}
+
 async function sendDataWindows(
 	socket: UdpConn,
 	remote: UdpAddr,
@@ -689,26 +741,31 @@ async function sendDataWindows(
 		}
 
 		await resendWindow()
-		const acked = await retry(async () => {
-			const ackIndex = await receiveWindowAck(
-				socket,
-				remote,
-				window,
-				options.timeoutMs,
-			)
-			if (ackIndex === undefined) {
-				await resendWindow()
-				throw createTFTPError(TFTPErrorCode.NOT_DEFINED, 'Timed out')
-			}
-			return ackIndex
-		}, {
-			maxAttempts: retries + 1,
-			jitter: 0,
-			minTimeout: 1,
-			maxTimeout: 1,
-			isRetriable: (error: unknown) =>
-				isTimeoutError(error) || isUnknownTransferIdError(error),
-		})
+		let acked: number
+		try {
+			acked = await retry(async () => {
+				const ackIndex = await receiveWindowAck(
+					socket,
+					remote,
+					window,
+					options.timeoutMs,
+				)
+				if (ackIndex === undefined) {
+					await resendWindow()
+					throw createTFTPError(TFTPErrorCode.NOT_DEFINED, 'Timed out')
+				}
+				return ackIndex
+			}, {
+				maxAttempts: retries + 1,
+				jitter: 0,
+				minTimeout: 1,
+				maxTimeout: 1,
+				isRetriable: (error: unknown) =>
+					isTransferTimeoutError(error) || isUnknownTransferIdError(error),
+			})
+		} catch (error) {
+			throw unwrapRetryError(error)
+		}
 		index += acked + 1
 	}
 }
@@ -817,6 +874,27 @@ function shouldSendOack(request: TFTPRequest): boolean {
 		Object.keys(request.extensions).length > 0
 }
 
+function buildOackOptions(
+	request: TFTPRequest,
+	response: TFTPResponse,
+	options: NegotiatedTransferOptions,
+): Partial<TFTPOptions> {
+	const oack: Partial<TFTPOptions> = {}
+	if (request.options.blksize !== undefined) {
+		oack.blksize = options.blksize
+	}
+	if (request.options.timeout !== undefined) {
+		oack.timeout = Math.max(1, Math.floor(options.timeoutMs / 1000))
+	}
+	if (request.options.windowsize !== undefined) {
+		oack.windowsize = options.windowsize
+	}
+	if (request.options.tsize !== undefined) {
+		oack.tsize = response.options?.tsize ?? request.options.tsize
+	}
+	return oack
+}
+
 function isTFTPError(
 	value: unknown,
 ): value is TFTPError {
@@ -828,9 +906,27 @@ function isTimeoutError(error: unknown): boolean {
 	return error instanceof DOMException && error.name === 'TimeoutError'
 }
 
+function isTransferTimeoutError(error: unknown): boolean {
+	return isTimeoutError(error) ||
+		(typeof error === 'object' && error !== null && 'code' in error &&
+			'message' in error && (error as { code: number }).code ===
+				TFTPErrorCode.NOT_DEFINED &&
+			(error as { message: string }).message === 'Timed out')
+}
+
 function isUnknownTransferIdError(error: unknown): boolean {
 	return typeof error === 'object' && error !== null && 'code' in error &&
 		(error as { code: number }).code === TFTPErrorCode.UNKNOWN_TRANSFER_ID
+}
+
+function unwrapRetryError(error: unknown): unknown {
+	if (error instanceof Error && 'cause' in error) {
+		const cause = (error as Error & { cause?: unknown }).cause
+		if (cause !== undefined) {
+			return cause
+		}
+	}
+	return error
 }
 
 function toSendAddr(addr: UdpAddr): Deno.NetAddr {

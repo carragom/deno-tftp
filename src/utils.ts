@@ -145,7 +145,6 @@ export function createClientRequest(
 			blksize: clientOptions.blockSize,
 			timeout: Math.max(1, Math.floor(clientOptions.timeout / 1000)),
 			windowsize: clientOptions.windowSize,
-			rollover: 0,
 			...(method === 'GET' ? { tsize: 0 } : {}),
 		}, init.options),
 		extensions: init.extensions,
@@ -377,6 +376,56 @@ export function textBody(text: string): ReadableStream<Uint8Array> {
 
 export function responseToBytes(response: TFTPResponse): Promise<Uint8Array> {
 	return readBodyToBytes(response.body)
+}
+
+export function encodeNetascii(data: Uint8Array): Uint8Array {
+	const out: number[] = []
+	for (const byte of data) {
+		if (byte === 0x0a) {
+			out.push(0x0d, 0x0a)
+		} else if (byte === 0x0d) {
+			out.push(0x0d, 0x00)
+		} else {
+			out.push(byte)
+		}
+	}
+	return Uint8Array.from(out)
+}
+
+export function decodeNetascii(data: Uint8Array): Uint8Array {
+	const out: number[] = []
+	let pendingCr = false
+	for (const byte of data) {
+		if (!pendingCr) {
+			if (byte === 0x0d) {
+				pendingCr = true
+			} else {
+				out.push(byte)
+			}
+			continue
+		}
+
+		if (byte === 0x0a) {
+			out.push(0x0a)
+			pendingCr = false
+			continue
+		}
+		if (byte === 0x00) {
+			out.push(0x0d)
+			pendingCr = false
+			continue
+		}
+
+		out.push(0x0d)
+		pendingCr = byte === 0x0d
+		if (!pendingCr) {
+			out.push(byte)
+		}
+	}
+	if (pendingCr) {
+		out.push(0x0d)
+	}
+	return Uint8Array.from(out)
 }
 
 export function rootDirectoryOfModuleUrl(url: string): string {

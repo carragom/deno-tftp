@@ -22,6 +22,8 @@ import type {
 } from './common.ts'
 import {
 	createClientRequest,
+	decodeNetascii,
+	encodeNetascii,
 	normalizeClientOptions,
 	readBodyToBytes,
 	streamFromBytes,
@@ -127,6 +129,9 @@ export class Client {
 		options: ClientPutOptions = {},
 	): Promise<TFTPResponse> {
 		const bytes = await readBodyToBytes(body)
+		const payload = options.mode === 'netascii'
+			? encodeNetascii(bytes)
+			: bytes
 		return await this.request(
 			createClientRequest('PUT', path, {
 				mode: options.mode,
@@ -134,10 +139,10 @@ export class Client {
 					...(options.options ?? {}),
 					...(options.size !== undefined
 						? { tsize: options.size }
-						: { tsize: bytes.length }),
+						: { tsize: payload.length }),
 				},
 				extensions: options.extensions,
-				body: streamFromBytes(bytes),
+				body: streamFromBytes(payload),
 			}, this.#options),
 		)
 	}
@@ -179,7 +184,9 @@ export class Client {
 		void lastAck
 
 		return {
-			body: streamFromBytes(data),
+			body: streamFromBytes(
+				request.mode === 'netascii' ? decodeNetascii(data) : data,
+			),
 			options: {
 				blksize: negotiated.blksize,
 				timeout: Math.max(1, Math.floor(negotiated.timeoutMs / 1000)),

@@ -20,6 +20,10 @@ The implementation targets these RFCs:
 - RFC 3617 - TFTP URI syntax for the CLI
 - RFC 7440 - windowsize option
 
+Block number rollover follows the common default behavior of wrapping from
+`65535` to `0`. The library does not advertise or negotiate the non-standard
+`rollover` option automatically.
+
 Conservative built-in server defaults:
 
 - only serves existing regular files under `root`
@@ -28,17 +32,21 @@ Conservative built-in server defaults:
 - allows creating new files by default
 - does not create parent directories unless configured
 
-## Install
+## Use This Repo
 
-```sh
-deno add jsr:@std/path jsr:@cliffy/command
+This repository is a Deno package with `mod.ts` as its public entrypoint. Import
+from the repo root when using it locally:
+
+```ts
+import { Client, Server } from './mod.ts'
 ```
 
-For local development use the built-in Deno tools:
+For local development, use the built-in Deno tools:
 
 ```sh
 deno fmt
 deno lint
+deno check mod.ts
 deno test -P
 ```
 
@@ -104,6 +112,8 @@ await server.listen()
 ```
 
 ## CLI Usage
+
+Run the CLIs from this repository with Deno:
 
 Fetch to stdout:
 
