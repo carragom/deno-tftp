@@ -1,12 +1,46 @@
 {
-  "name": "deno-tftp",
-  "version": "0.1.0",
-  "exports": "./mod.ts",
-  "tasks": {
-    "test": "deno test -P"
-  },
-  "license": "MIT",
-  "imports": {
-    "@std/assert": "jsr:@std/assert@1"
-  }
+	"name": "deno-tftp",
+	"version": "0.1.0",
+	"license": "MIT",
+	"lock": false,
+	"exports": {
+		".": "./mod.ts"
+	},
+	"unstable": [
+		"net"
+	],
+	"fmt": {
+		"useTabs": true,
+		"indentWidth": 3,
+		"semiColons": false,
+		"singleQuote": true
+	},
+	"test": {
+		"include": [
+			"src/**/*_test.ts"
+		],
+		"permissions": {
+			"net": true,
+			"read": true,
+			"write": true,
+			"run": true,
+			"env": [
+				"TEST_INTEROP_CLIENT",
+				"TEST_INTEROP_SERVER"
+			]
+		}
+	},
+	"tasks": {
+		"test": {
+			"dependencies": ["test:integration", "test:unit"]
+		},
+		"test:integration": "deno test -P src/integration_test.ts",
+		"test:unit": "deno test -P --ignore=src/integration_test.ts"
+	},
+	"imports": {
+		"@std/async": "jsr:@std/async@^1.2.0",
+		"@cliffy/command": "jsr:@cliffy/command@^1.0.0",
+		"@std/assert": "jsr:@std/assert@^1.0.19",
+		"@std/path": "jsr:@std/path@^1.1.4"
+	}
 }
