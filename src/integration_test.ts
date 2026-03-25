@@ -8,6 +8,11 @@ import {
 	streamFromBytes,
 } from './utils.ts'
 
+const interopServerValue = Deno.env.get('TEST_INTEROP_SERVER')
+const interopClientName = parseInteropClientName(
+	Deno.env.get('TEST_INTEROP_CLIENT'),
+)
+
 Deno.test('client and server interoperate in-process', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
@@ -151,154 +156,159 @@ Deno.test('client and server translate netascii on PUT in-process', async () => 
 	}
 })
 
-Deno.test('client interop tests are gated by TEST_INTEROP_SERVER', () => {
-	const value = Deno.env.get('TEST_INTEROP_SERVER')
-	if (!value) {
-		return
-	}
-	const parsed = parseInteropServer(value)
-	assertEquals(typeof parsed.host, 'string')
-	assertEquals(typeof parsed.port, 'number')
+Deno.test({
+	name: 'client can talk to external interop server when configured',
+	ignore: !interopServerValue,
+	async fn() {
+		const { host, port } = parseInteropServer(interopServerValue!)
+		const client = new Client({ host, port })
+		const response = await client.get('hello.txt')
+		assertEquals(
+			new TextDecoder().decode(await readBodyToBytes(response.body)),
+			'hello\n',
+		)
+	},
 })
 
-Deno.test('server interop tests are gated by TEST_INTEROP_CLIENT', () => {
-	const value = Deno.env.get('TEST_INTEROP_CLIENT')
-	if (!value) {
-		return
-	}
+Deno.test({
+	name:
+		'client negotiates options with external interop server when configured',
+	ignore: !interopServerValue,
+	async fn() {
+		const { host, port } = parseInteropServer(interopServerValue!)
+		const client = new Client({ host, port, blockSize: 1024, windowSize: 4 })
+		const response = await client.get('hello.txt')
+		assertEquals(
+			new TextDecoder().decode(await readBodyToBytes(response.body)),
+			'hello\n',
+		)
+		assertEquals(response.options?.blksize, 1024)
+		assertEquals(response.options?.windowsize, 4)
+		assertEquals(response.options?.tsize, 6)
+	},
+})
+
+Deno.test({
+	name: 'external interop client can talk to this server when configured',
+	ignore: !interopClientName,
+	async fn() {
+		const root = await Deno.makeTempDir()
+		await Deno.writeTextFile(`${root}/hello.txt`, 'hello\n')
+
+		const server = new Server(undefined, {
+			host: '127.0.0.1',
+			port: 1091,
+			root,
+		})
+		await server.listen()
+		try {
+			if (interopClientName === 'atftp') {
+				const command = new Deno.Command('atftp', {
+					args: [
+						'--get',
+						'--local-file',
+						'-',
+						'--remote-file',
+						'hello.txt',
+						'127.0.0.1',
+						'1091',
+					],
+					stdout: 'piped',
+				})
+				const output = await command.output()
+				assertEquals(new TextDecoder().decode(output.stdout), 'hello\n')
+			} else {
+				const command = new Deno.Command('tftp', {
+					args: ['127.0.0.1', '1091'],
+					stdin: 'piped',
+					stdout: 'piped',
+				})
+				const child = command.spawn()
+				const writer = child.stdin.getWriter()
+				await writer.write(
+					new TextEncoder().encode('get hello.txt -\nquit\n'),
+				)
+				await writer.close()
+				const output = await child.output()
+				assertEquals(
+					new TextDecoder().decode(output.stdout).includes('hello'),
+					true,
+				)
+			}
+		} finally {
+			await server.close()
+		}
+	},
+})
+
+Deno.test({
+	name: 'external interop client can upload to this server when configured',
+	ignore: !interopClientName,
+	async fn() {
+		const root = await Deno.makeTempDir()
+		const inputFile = `${root}/input.txt`
+		await Deno.writeTextFile(inputFile, 'uploaded via interop\n')
+
+		const server = new Server(undefined, {
+			host: '127.0.0.1',
+			port: 1096,
+			root,
+		})
+		await server.listen()
+		try {
+			if (interopClientName === 'atftp') {
+				const command = new Deno.Command('atftp', {
+					args: [
+						'--put',
+						'--local-file',
+						inputFile,
+						'--remote-file',
+						'upload.txt',
+						'127.0.0.1',
+						'1096',
+					],
+					stdout: 'piped',
+					stderr: 'piped',
+				})
+				const output = await command.output()
+				if (!output.success) {
+					throw new Error(new TextDecoder().decode(output.stderr))
+				}
+			} else {
+				const command = new Deno.Command('tftp', {
+					args: ['127.0.0.1', '1096'],
+					stdin: 'piped',
+					stdout: 'piped',
+					stderr: 'piped',
+				})
+				const child = command.spawn()
+				const writer = child.stdin.getWriter()
+				await writer.write(
+					new TextEncoder().encode(`put ${inputFile} upload.txt\nquit\n`),
+				)
+				await writer.close()
+				const output = await child.output()
+				if (!output.success) {
+					throw new Error(new TextDecoder().decode(output.stderr))
+				}
+			}
+
+			assertEquals(
+				await Deno.readTextFile(`${root}/upload.txt`),
+				'uploaded via interop\n',
+			)
+		} finally {
+			await server.close()
+		}
+	},
+})
+
+function parseInteropClientName(
+	value: string | undefined,
+): 'atftp' | 'tftp' | undefined {
+	if (!value) return undefined
 	if (value !== 'atftp' && value !== 'tftp') {
 		throw new Error(`Unsupported TEST_INTEROP_CLIENT value: ${value}`)
 	}
-})
-
-Deno.test('client can talk to external interop server when configured', async () => {
-	const value = Deno.env.get('TEST_INTEROP_SERVER')
-	if (!value) return
-
-	const { host, port } = parseInteropServer(value)
-	const client = new Client({ host, port })
-	const response = await client.get('hello.txt')
-	assertEquals(
-		new TextDecoder().decode(await readBodyToBytes(response.body)),
-		'hello\n',
-	)
-})
-
-Deno.test('client negotiates options with external interop server when configured', async () => {
-	const value = Deno.env.get('TEST_INTEROP_SERVER')
-	if (!value) return
-
-	const { host, port } = parseInteropServer(value)
-	const client = new Client({ host, port, blockSize: 1024, windowSize: 4 })
-	const response = await client.get('hello.txt')
-	assertEquals(
-		new TextDecoder().decode(await readBodyToBytes(response.body)),
-		'hello\n',
-	)
-	assertEquals(response.options?.blksize, 1024)
-	assertEquals(response.options?.windowsize, 4)
-	assertEquals(response.options?.tsize, 6)
-})
-
-Deno.test('external interop client can talk to this server when configured', async () => {
-	const clientName = Deno.env.get('TEST_INTEROP_CLIENT')
-	if (!clientName) return
-
-	const root = await Deno.makeTempDir()
-	await Deno.writeTextFile(`${root}/hello.txt`, 'hello\n')
-
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1091, root })
-	await server.listen()
-	try {
-		if (clientName === 'atftp') {
-			const command = new Deno.Command('atftp', {
-				args: [
-					'--get',
-					'--local-file',
-					'-',
-					'--remote-file',
-					'hello.txt',
-					'127.0.0.1',
-					'1091',
-				],
-				stdout: 'piped',
-			})
-			const output = await command.output()
-			assertEquals(new TextDecoder().decode(output.stdout), 'hello\n')
-		} else {
-			const command = new Deno.Command('tftp', {
-				args: ['127.0.0.1', '1091'],
-				stdin: 'piped',
-				stdout: 'piped',
-			})
-			const child = command.spawn()
-			const writer = child.stdin.getWriter()
-			await writer.write(new TextEncoder().encode('get hello.txt -\nquit\n'))
-			await writer.close()
-			const output = await child.output()
-			assertEquals(
-				new TextDecoder().decode(output.stdout).includes('hello'),
-				true,
-			)
-		}
-	} finally {
-		await server.close()
-	}
-})
-
-Deno.test('external interop client can upload to this server when configured', async () => {
-	const clientName = Deno.env.get('TEST_INTEROP_CLIENT')
-	if (!clientName) return
-
-	const root = await Deno.makeTempDir()
-	const inputFile = `${root}/input.txt`
-	await Deno.writeTextFile(inputFile, 'uploaded via interop\n')
-
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1096, root })
-	await server.listen()
-	try {
-		if (clientName === 'atftp') {
-			const command = new Deno.Command('atftp', {
-				args: [
-					'--put',
-					'--local-file',
-					inputFile,
-					'--remote-file',
-					'upload.txt',
-					'127.0.0.1',
-					'1096',
-				],
-				stdout: 'piped',
-				stderr: 'piped',
-			})
-			const output = await command.output()
-			if (!output.success) {
-				throw new Error(new TextDecoder().decode(output.stderr))
-			}
-		} else {
-			const command = new Deno.Command('tftp', {
-				args: ['127.0.0.1', '1096'],
-				stdin: 'piped',
-				stdout: 'piped',
-				stderr: 'piped',
-			})
-			const child = command.spawn()
-			const writer = child.stdin.getWriter()
-			await writer.write(
-				new TextEncoder().encode(`put ${inputFile} upload.txt\nquit\n`),
-			)
-			await writer.close()
-			const output = await child.output()
-			if (!output.success) {
-				throw new Error(new TextDecoder().decode(output.stderr))
-			}
-		}
-
-		assertEquals(
-			await Deno.readTextFile(`${root}/upload.txt`),
-			'uploaded via interop\n',
-		)
-	} finally {
-		await server.close()
-	}
-})
+	return value
+}
