@@ -153,6 +153,13 @@ Run the unit and self-contained integration tests:
 deno test -P
 ```
 
+The test suite is designed to be safe for parallel execution. For a faster local
+run, use:
+
+```sh
+deno test -P --parallel
+```
+
 `src/transport_test.ts` covers wire-level UDP and TFTP edge cases such as OACK
 validation, partial-window acknowledgments, duplicate or out-of-order packets,
 unknown transfer IDs, and transfer-size mismatch handling.

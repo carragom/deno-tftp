@@ -108,6 +108,10 @@ Test split guidance:
   behavior
 - keep `src/integration_test.ts` for in-process integration and env-gated
   external interop
+- prefer ephemeral bind ports (`port: 0`) in network tests and use the bound
+  `server.host` / `server.port` after `listen()`
+- prefer `Deno.test({ ignore: ... })` for env-gated interop tests instead of
+  registering tests that immediately return
 
 ## CLI
 

@@ -71,10 +71,16 @@ export class Server {
 	}
 
 	get host(): string {
+		if (this.#socket) {
+			return (this.#socket.addr as Deno.NetAddr).hostname
+		}
 		return this.#options.host
 	}
 
 	get port(): number {
+		if (this.#socket) {
+			return (this.#socket.addr as Deno.NetAddr).port
+		}
 		return this.#options.port
 	}
 

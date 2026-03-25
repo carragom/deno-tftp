@@ -14,7 +14,7 @@ Deno.test('server serves existing regular file before custom handler', async () 
 		}),
 		{
 			host: '127.0.0.1',
-			port: 1080,
+			port: 0,
 			root,
 		},
 	)
@@ -44,7 +44,7 @@ Deno.test('server route handles dynamic request', async () => {
 		},
 	], () => ({ error: createTFTPError(TFTPErrorCode.FILE_NOT_FOUND) }))
 
-	const server = new Server(handler, { host: '127.0.0.1', port: 1081 })
+	const server = new Server(handler, { host: '127.0.0.1', port: 0 })
 	await server.listen()
 	try {
 		const response = await server.request(
@@ -66,7 +66,7 @@ Deno.test('server route handles dynamic request', async () => {
 Deno.test('server rejects overwrite by default', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/file.txt`, 'old')
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1082, root })
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
 	await server.listen()
 	try {
 		const response = await server.request(
@@ -85,7 +85,7 @@ Deno.test('server creates directories recursively when enabled', async () => {
 	const root = await Deno.makeTempDir()
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1083,
+		port: 0,
 		root,
 		allowCreateDir: true,
 	})
@@ -111,7 +111,7 @@ Deno.test('server enforces maxPutSize', async () => {
 	const root = await Deno.makeTempDir()
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1084,
+		port: 0,
 		root,
 		maxPutSize: 2,
 	})

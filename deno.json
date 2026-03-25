@@ -31,11 +31,7 @@
 		}
 	},
 	"tasks": {
-		"test": {
-			"dependencies": ["test:integration", "test:unit"]
-		},
-		"test:integration": "deno test -P src/integration_test.ts",
-		"test:unit": "deno test -P --ignore=src/integration_test.ts"
+		"test": "deno test -P --parallel"
 	},
 	"imports": {
 		"@std/async": "jsr:@std/async@^1.2.0",

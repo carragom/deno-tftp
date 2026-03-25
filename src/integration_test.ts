@@ -17,10 +17,10 @@ Deno.test('client and server interoperate in-process', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
 
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1090, root })
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
 	await server.listen()
 	try {
-		const client = new Client({ host: '127.0.0.1', port: 1090 })
+		const client = new Client({ host: server.host, port: server.port })
 		const getResponse = await client.get('hello.txt')
 		assertEquals(
 			new TextDecoder().decode(await readBodyToBytes(getResponse.body)),
@@ -44,7 +44,7 @@ Deno.test('client and server negotiate windowsize and blocksize in-process', asy
 
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1092,
+		port: 0,
 		root,
 		blockSize: 1024,
 		windowSize: 4,
@@ -52,8 +52,8 @@ Deno.test('client and server negotiate windowsize and blocksize in-process', asy
 	await server.listen()
 	try {
 		const client = new Client({
-			host: '127.0.0.1',
-			port: 1092,
+			host: server.host,
+			port: server.port,
 			blockSize: 1024,
 			windowSize: 4,
 		})
@@ -74,11 +74,11 @@ Deno.test('client and server handle concurrent RRQ in-process', async () => {
 	const payload = 'x'.repeat(4096)
 	await Deno.writeTextFile(`${root}/shared.txt`, payload)
 
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1089, root })
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
 	await server.listen()
 	try {
 		const jobs = Array.from({ length: 8 }, async () => {
-			const client = new Client({ host: '127.0.0.1', port: 1089 })
+			const client = new Client({ host: server.host, port: server.port })
 			const response = await client.get('shared.txt')
 			return new TextDecoder().decode(await readBodyToBytes(response.body))
 		})
@@ -90,11 +90,11 @@ Deno.test('client and server handle concurrent RRQ in-process', async () => {
 
 Deno.test('client and server handle concurrent WRQ in-process', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1088, root })
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
 	await server.listen()
 	try {
 		await Promise.all(Array.from({ length: 6 }, async (_, index) => {
-			const client = new Client({ host: '127.0.0.1', port: 1088 })
+			const client = new Client({ host: server.host, port: server.port })
 			const body = `upload-${index}`
 			await client.put(
 				`upload-${index}.txt`,
@@ -114,12 +114,12 @@ Deno.test('client and server translate netascii on GET in-process', async () => 
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/unix.txt`, 'foo\nbar\rbaz\n')
 
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1087, root })
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
 	await server.listen()
 	try {
 		const client = new Client({
-			host: '127.0.0.1',
-			port: 1087,
+			host: server.host,
+			port: server.port,
 			blockSize: 64,
 		})
 		const response = await client.get('unix.txt', { mode: 'netascii' })
@@ -134,12 +134,12 @@ Deno.test('client and server translate netascii on GET in-process', async () => 
 
 Deno.test('client and server translate netascii on PUT in-process', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1086, root })
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
 	await server.listen()
 	try {
 		const client = new Client({
-			host: '127.0.0.1',
-			port: 1086,
+			host: server.host,
+			port: server.port,
 			blockSize: 64,
 		})
 		await client.put(
@@ -197,7 +197,7 @@ Deno.test({
 
 		const server = new Server(undefined, {
 			host: '127.0.0.1',
-			port: 1091,
+			port: 0,
 			root,
 		})
 		await server.listen()
@@ -211,7 +211,7 @@ Deno.test({
 						'--remote-file',
 						'hello.txt',
 						'127.0.0.1',
-						'1091',
+						String(server.port),
 					],
 					stdout: 'piped',
 				})
@@ -219,7 +219,7 @@ Deno.test({
 				assertEquals(new TextDecoder().decode(output.stdout), 'hello\n')
 			} else {
 				const command = new Deno.Command('tftp', {
-					args: ['127.0.0.1', '1091'],
+					args: ['127.0.0.1', String(server.port)],
 					stdin: 'piped',
 					stdout: 'piped',
 				})
@@ -251,7 +251,7 @@ Deno.test({
 
 		const server = new Server(undefined, {
 			host: '127.0.0.1',
-			port: 1096,
+			port: 0,
 			root,
 		})
 		await server.listen()
@@ -265,7 +265,7 @@ Deno.test({
 						'--remote-file',
 						'upload.txt',
 						'127.0.0.1',
-						'1096',
+						String(server.port),
 					],
 					stdout: 'piped',
 					stderr: 'piped',
@@ -276,7 +276,7 @@ Deno.test({
 				}
 			} else {
 				const command = new Deno.Command('tftp', {
-					args: ['127.0.0.1', '1096'],
+					args: ['127.0.0.1', String(server.port)],
 					stdin: 'piped',
 					stdout: 'piped',
 					stderr: 'piped',

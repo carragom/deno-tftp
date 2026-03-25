@@ -30,13 +30,13 @@ Deno.test('client rejects server OACK that increases requested windowsize', asyn
 			options: { blksize: 512, windowsize: 8 },
 			body: streamFromBytes(new Uint8Array()),
 		}),
-		{ host: '127.0.0.1', port: 1093 },
+		{ host: '127.0.0.1', port: 0 },
 	)
 	await server.listen()
 	try {
 		const client = new Client({
-			host: '127.0.0.1',
-			port: 1093,
+			host: server.host,
+			port: server.port,
 			windowSize: 4,
 			timeout: TEST_TIMEOUT_MS,
 			retries: TEST_RETRIES,
@@ -52,7 +52,7 @@ Deno.test('server returns unknown transfer id error to unexpected peer', async (
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1094,
+		port: 0,
 		root,
 		timeout: TEST_TIMEOUT_MS,
 		retries: TEST_RETRIES,
@@ -69,9 +69,14 @@ Deno.test('server returns unknown transfer id error to unexpected peer', async (
 		port: 0,
 	})
 	try {
+		const serverAddr = {
+			transport: 'udp' as const,
+			hostname: server.host,
+			port: server.port,
+		}
 		await socket.send(
 			encodeRequestPacket(createRequest('GET', 'hello.txt')),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1094 },
+			serverAddr,
 		)
 		const [packet, addr] = await socket.receive()
 		const remote = addr as Deno.NetAddr & { transport: 'udp' }
@@ -98,7 +103,7 @@ Deno.test('server returns unknown transfer id error to unexpected peer', async (
 })
 
 Deno.test('server ignores or errors on forged invalid opcode to listening port', async () => {
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1102 })
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0 })
 	await server.listen()
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
@@ -108,7 +113,7 @@ Deno.test('server ignores or errors on forged invalid opcode to listening port',
 	try {
 		await socket.send(
 			new Uint8Array([0, 99, 106, 117, 110, 107, 0]),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1102 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 		const reply = await maybeReceiveDatagram(socket, 500)
 		if (!reply) return
@@ -122,7 +127,7 @@ Deno.test('server ignores or errors on forged invalid opcode to listening port',
 })
 
 Deno.test('server rejects forged ACK to listening port with illegal operation', async () => {
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1103 })
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0 })
 	await server.listen()
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
@@ -132,7 +137,7 @@ Deno.test('server rejects forged ACK to listening port with illegal operation', 
 	try {
 		await socket.send(
 			encodeAckPacket(1),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1103 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 		const [packet] = await receiveDatagram(socket)
 		const error = decodeErrorPacket(packet)
@@ -144,7 +149,7 @@ Deno.test('server rejects forged ACK to listening port with illegal operation', 
 })
 
 Deno.test('server rejects forged DATA to listening port with illegal operation', async () => {
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1104 })
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0 })
 	await server.listen()
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
@@ -154,7 +159,7 @@ Deno.test('server rejects forged DATA to listening port with illegal operation',
 	try {
 		await socket.send(
 			encodeDataPacket(1, new Uint8Array([1, 2, 3])),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1104 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 		const [packet] = await receiveDatagram(socket)
 		const error = decodeErrorPacket(packet)
@@ -170,7 +175,7 @@ Deno.test('server ignores short malformed packets without crashing accept loop',
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1106,
+		port: 0,
 		root,
 		timeout: TEST_TIMEOUT_MS,
 		retries: TEST_RETRIES,
@@ -184,7 +189,7 @@ Deno.test('server ignores short malformed packets without crashing accept loop',
 	try {
 		await socket.send(
 			new Uint8Array([0]),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1106 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 		const maybeError = await maybeReceiveDatagram(socket, 200)
 		if (maybeError) {
@@ -197,7 +202,7 @@ Deno.test('server ignores short malformed packets without crashing accept loop',
 
 		await socket.send(
 			encodeRequestPacket(createRequest('GET', 'hello.txt')),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1106 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 		const [packet] = await receiveDatagram(socket)
 		assertEquals(
@@ -216,7 +221,7 @@ Deno.test('server OACK only includes options requested by the client', async () 
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1107,
+		port: 0,
 		root,
 		blockSize: 1024,
 		windowSize: 8,
@@ -234,7 +239,7 @@ Deno.test('server OACK only includes options requested by the client', async () 
 			encodeRequestPacket(createRequest('GET', 'hello.txt', {
 				options: { tsize: 0 },
 			})),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1107 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 		const [packet, addr] = await receiveDatagram(socket)
 		const remote = addr as UdpAddr
@@ -261,7 +266,7 @@ Deno.test('server omits tsize from netascii RRQ OACK', async () => {
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello\n')
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1109,
+		port: 0,
 		root,
 		timeout: TEST_TIMEOUT_MS,
 		retries: TEST_RETRIES,
@@ -278,7 +283,7 @@ Deno.test('server omits tsize from netascii RRQ OACK', async () => {
 				mode: 'netascii',
 				options: { tsize: 0 },
 			})),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1109 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 		const [packet, addr] = await receiveDatagram(socket)
 		const remote = addr as UdpAddr
@@ -298,7 +303,7 @@ Deno.test('server omits tsize from netascii RRQ OACK', async () => {
 })
 
 Deno.test('server rejects malformed RRQ missing mode terminator', async () => {
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1113 })
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0 })
 	await server.listen()
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
@@ -308,7 +313,7 @@ Deno.test('server rejects malformed RRQ missing mode terminator', async () => {
 	try {
 		await socket.send(
 			new Uint8Array([0, 1, 102, 111, 111, 0, 111, 99, 116, 101, 116]),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1113 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 		const [packet] = await receiveDatagram(socket)
 		const error = decodeErrorPacket(packet)
@@ -320,7 +325,7 @@ Deno.test('server rejects malformed RRQ missing mode terminator', async () => {
 })
 
 Deno.test('server rejects malformed RRQ missing transfer mode', async () => {
-	const server = new Server(undefined, { host: '127.0.0.1', port: 1114 })
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0 })
 	await server.listen()
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
@@ -330,7 +335,7 @@ Deno.test('server rejects malformed RRQ missing transfer mode', async () => {
 	try {
 		await socket.send(
 			new Uint8Array([0, 1, 102, 111, 111, 0]),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1114 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 		const [packet] = await receiveDatagram(socket)
 		const error = decodeErrorPacket(packet)
@@ -345,7 +350,7 @@ Deno.test('client and server can transfer windowed PUT data', async () => {
 	const root = await Deno.makeTempDir()
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1095,
+		port: 0,
 		root,
 		allowCreateDir: true,
 		blockSize: 1024,
@@ -356,8 +361,8 @@ Deno.test('client and server can transfer windowed PUT data', async () => {
 	await server.listen()
 	try {
 		const client = new Client({
-			host: '127.0.0.1',
-			port: 1095,
+			host: server.host,
+			port: server.port,
 			blockSize: 1024,
 			windowSize: 4,
 			timeout: TEST_TIMEOUT_MS,
@@ -378,13 +383,14 @@ Deno.test('client PUT advances after partial window ACK', async () => {
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
 		hostname: '127.0.0.1',
-		port: 1096,
+		port: 0,
 	})
 	try {
+		const socketAddr = socket.addr as UdpAddr
 		const payload = new TextEncoder().encode('x'.repeat(39))
 		const client = new Client({
 			host: '127.0.0.1',
-			port: 1096,
+			port: socketAddr.port,
 			blockSize: 8,
 			windowSize: 4,
 			timeout: TEST_TIMEOUT_MS,
@@ -429,7 +435,7 @@ Deno.test('client and server handle block rollover for PUT data', async () => {
 	const root = await Deno.makeTempDir()
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1105,
+		port: 0,
 		root,
 		blockSize: 8,
 		windowSize: 1,
@@ -439,8 +445,8 @@ Deno.test('client and server handle block rollover for PUT data', async () => {
 	await server.listen()
 	try {
 		const client = new Client({
-			host: '127.0.0.1',
-			port: 1105,
+			host: server.host,
+			port: server.port,
 			blockSize: 8,
 			windowSize: 1,
 			timeout: TEST_TIMEOUT_MS,
@@ -464,7 +470,7 @@ Deno.test('server ignores duplicate old ACK after partial window ACK', async () 
 	await Deno.writeTextFile(`${root}/partial.txt`, 'x'.repeat(39))
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1097,
+		port: 0,
 		root,
 		blockSize: 8,
 		windowSize: 4,
@@ -482,7 +488,7 @@ Deno.test('server ignores duplicate old ACK after partial window ACK', async () 
 			encodeRequestPacket(createRequest('GET', 'partial.txt', {
 				options: { blksize: 8, windowsize: 4 },
 			})),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1097 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 
 		const [oackPacket, addr] = await receiveDatagram(socket)
@@ -515,7 +521,7 @@ Deno.test('server resends tail of GET window after partial ACK and timeout', asy
 	await Deno.writeTextFile(`${root}/rfc7440.txt`, 'x'.repeat(39))
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1110,
+		port: 0,
 		root,
 		blockSize: 8,
 		windowSize: 4,
@@ -533,7 +539,7 @@ Deno.test('server resends tail of GET window after partial ACK and timeout', asy
 			encodeRequestPacket(createRequest('GET', 'rfc7440.txt', {
 				options: { blksize: 8, windowsize: 4 },
 			})),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1110 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 
 		const [oackPacket, addr] = await receiveDatagram(socket)
@@ -561,7 +567,7 @@ Deno.test('server ACKs last good block for duplicate and out-of-order PUT data',
 	const root = await Deno.makeTempDir()
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1098,
+		port: 0,
 		root,
 		blockSize: 8,
 		windowSize: 4,
@@ -579,7 +585,7 @@ Deno.test('server ACKs last good block for duplicate and out-of-order PUT data',
 			encodeRequestPacket(createRequest('PUT', 'dup.txt', {
 				options: { blksize: 8, windowsize: 4, tsize: 12 },
 			})),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1098 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 
 		const [oackPacket, addr] = await receiveDatagram(socket)
@@ -620,7 +626,7 @@ Deno.test('server re-ACKs last committed PUT block after hole in window', async 
 	const root = await Deno.makeTempDir()
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1111,
+		port: 0,
 		root,
 		blockSize: 8,
 		windowSize: 4,
@@ -638,7 +644,7 @@ Deno.test('server re-ACKs last committed PUT block after hole in window', async 
 			encodeRequestPacket(createRequest('PUT', 'window.txt', {
 				options: { blksize: 8, windowsize: 4, tsize: 28 },
 			})),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1111 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 
 		const [oackPacket, addr] = await receiveDatagram(socket)
@@ -682,7 +688,7 @@ Deno.test('server resends final ACK when last WRQ data block is retransmitted', 
 	const root = await Deno.makeTempDir()
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1108,
+		port: 0,
 		root,
 		blockSize: 8,
 		windowSize: 1,
@@ -700,7 +706,7 @@ Deno.test('server resends final ACK when last WRQ data block is retransmitted', 
 			encodeRequestPacket(createRequest('PUT', 'late.txt', {
 				options: { blksize: 8, windowsize: 1, tsize: 5 },
 			})),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1108 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 
 		const [oackPacket, addr] = await receiveDatagram(socket)
@@ -724,7 +730,7 @@ Deno.test('server rejects PUT body larger than declared tsize', async () => {
 	const root = await Deno.makeTempDir()
 	const server = new Server(undefined, {
 		host: '127.0.0.1',
-		port: 1099,
+		port: 0,
 		root,
 		blockSize: 8,
 		windowSize: 4,
@@ -742,7 +748,7 @@ Deno.test('server rejects PUT body larger than declared tsize', async () => {
 			encodeRequestPacket(createRequest('PUT', 'size.txt', {
 				options: { blksize: 8, windowsize: 4, tsize: 4 },
 			})),
-			{ transport: 'udp', hostname: '127.0.0.1', port: 1099 },
+			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 
 		const [oackPacket, addr] = await receiveDatagram(socket)
@@ -769,12 +775,13 @@ Deno.test('client ACKs last good block for duplicate and out-of-order GET data',
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
 		hostname: '127.0.0.1',
-		port: 1100,
+		port: 0,
 	})
 	try {
+		const socketAddr = socket.addr as UdpAddr
 		const client = new Client({
 			host: '127.0.0.1',
-			port: 1100,
+			port: socketAddr.port,
 			blockSize: 8,
 			windowSize: 4,
 			timeout: TEST_TIMEOUT_MS,
@@ -835,12 +842,13 @@ Deno.test('client re-ACKs old GET block after dropped tail of window', async () 
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
 		hostname: '127.0.0.1',
-		port: 1112,
+		port: 0,
 	})
 	try {
+		const socketAddr = socket.addr as UdpAddr
 		const client = new Client({
 			host: '127.0.0.1',
-			port: 1112,
+			port: socketAddr.port,
 			blockSize: 8,
 			windowSize: 4,
 			timeout: TEST_TIMEOUT_MS,
@@ -917,12 +925,13 @@ Deno.test('client ignores out-of-order GET data before first valid block', async
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
 		hostname: '127.0.0.1',
-		port: 1101,
+		port: 0,
 	})
 	try {
+		const socketAddr = socket.addr as UdpAddr
 		const client = new Client({
 			host: '127.0.0.1',
-			port: 1101,
+			port: socketAddr.port,
 			blockSize: 8,
 			windowSize: 4,
 			timeout: TEST_TIMEOUT_MS,

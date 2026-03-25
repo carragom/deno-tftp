@@ -107,7 +107,12 @@ export function normalizeServerOptions(options: {
 	retries?: number
 } = {}): NormalizedServerOptions {
 	return {
-		...normalizeClientOptions(options),
+		host: options.host ?? '127.0.0.1',
+		port: normalizeBindPort(options.port),
+		blockSize: normalizeBlockSize(options.blockSize),
+		windowSize: normalizeWindowSize(options.windowSize),
+		timeout: normalizePositiveInteger(options.timeout, TFTPDefaultTimeout),
+		retries: normalizePositiveInteger(options.retries, TFTPDefaultRetries),
 		root: options.root,
 		denyGET: options.denyGET ?? false,
 		denyPUT: options.denyPUT ?? false,
@@ -446,6 +451,14 @@ async function maybeLstat(path: string): Promise<Deno.FileInfo | undefined> {
 function normalizePort(port: number | undefined): number {
 	const value = port ?? TFTPDefaultPort
 	if (!Number.isInteger(value) || value < 1 || value > 65535) {
+		throw new RangeError(`Invalid port: ${value}`)
+	}
+	return value
+}
+
+function normalizeBindPort(port: number | undefined): number {
+	const value = port ?? TFTPDefaultPort
+	if (!Number.isInteger(value) || value < 0 || value > 65535) {
 		throw new RangeError(`Invalid port: ${value}`)
 	}
 	return value
