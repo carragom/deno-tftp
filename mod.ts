@@ -35,6 +35,10 @@
  *
  * const client = new Client({ host: '127.0.0.1', port: 1069 })
  * const response = await client.get('boot/kernel.img')
+ * if (!response.ok) {
+ *   console.error(response.error?.code, response.error?.message)
+ *   Deno.exit(1)
+ * }
  * await response.body?.pipeTo(Deno.stdout.writable)
  * ```
  *
@@ -58,6 +62,10 @@
  * const response = await client.request('boot/kernel.img', 'GET', {
  *   options: { blksize: 1468, windowsize: 4 },
  * })
+ * if (!response.ok) {
+ *   console.error(response.error?.code, response.error?.message)
+ *   Deno.exit(1)
+ * }
  * await response.body?.pipeTo(Deno.stdout.writable)
  * ```
  *

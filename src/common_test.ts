@@ -17,6 +17,7 @@ import {
 	TFTPMinBlockSize,
 	TFTPMinTimeoutSeconds,
 	TFTPRequest,
+	TFTPResponse,
 } from './common.ts'
 
 Deno.test('request class normalizes defaults and freezes maps', () => {
@@ -48,6 +49,29 @@ Deno.test('request with clones overrides', () => {
 	assertEquals(next.mode, 'netascii')
 	assertEquals(next.options.blksize, 1468)
 	assertEquals(request.path, 'boot/file.bin')
+})
+
+Deno.test('response class computes ok and freezes maps', () => {
+	const response = new TFTPResponse({
+		options: { blksize: 1468 },
+		extensions: { token: 'abc' },
+	})
+
+	assertEquals(response.ok, true)
+	assertThrows(() => {
+		;(response.options as { blksize?: number }).blksize = 1
+	}, TypeError)
+	assertThrows(() => {
+		;(response.extensions as Record<string, string>).token = 'def'
+	}, TypeError)
+
+	const errorResponse = new TFTPResponse({
+		error: decodeErrorPacket(
+			encodeErrorPacket(new TFTPError(TFTPErrorCode.FILE_NOT_FOUND)),
+		),
+	})
+	assertEquals(errorResponse.ok, false)
+	assertEquals(errorResponse.error?.code, TFTPErrorCode.FILE_NOT_FOUND)
 })
 
 Deno.test('request packet round-trips', () => {

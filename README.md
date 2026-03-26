@@ -60,6 +60,11 @@ import { Client } from './mod.ts'
 const client = new Client({ host: '127.0.0.1', port: 69 })
 const response = await client.get('boot/kernel.img')
 
+if (!response.ok) {
+	console.error(response.error?.code, response.error?.message)
+	Deno.exit(1)
+}
+
 if (!response.body) throw new Error('Missing response body')
 await response.body.pipeTo(Deno.stdout.writable)
 ```
@@ -85,6 +90,11 @@ const client = new Client({ host: '127.0.0.1', port: 69 })
 const response = await client.request('boot/kernel.img', 'GET', {
 	options: { blksize: 1468, windowsize: 4 },
 })
+
+if (!response.ok) {
+	console.error(response.error?.code, response.error?.message)
+	Deno.exit(1)
+}
 
 if (!response.body) throw new Error('Missing response body')
 await response.body.pipeTo(Deno.stdout.writable)

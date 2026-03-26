@@ -16,6 +16,7 @@ import {
 	TFTPIllegalOperationError,
 	TFTPOpcode,
 	TFTPRequest,
+	TFTPResponse,
 	TFTPUnknownTransferIdError,
 } from './common.ts'
 import type {
@@ -24,7 +25,7 @@ import type {
 	TFTPHandler,
 	TFTPOptions,
 	TFTPRequestInit,
-	TFTPResponse,
+	TFTPResponseInit,
 	TFTPRoute,
 	TFTPServeHandlerInfo,
 } from './common.ts'
@@ -169,20 +170,20 @@ export class Server {
 		}
 
 		if (request.method === 'GET' && this.#options.denyGET) {
-			return {
+			return new TFTPResponse({
 				error: new TFTPError(
 					TFTPErrorCode.ACCESS_VIOLATION,
 					'Cannot GET files',
 				),
-			}
+			})
 		}
 		if (request.method === 'PUT' && this.#options.denyPUT) {
-			return {
+			return new TFTPResponse({
 				error: new TFTPError(
 					TFTPErrorCode.ACCESS_VIOLATION,
 					'Cannot PUT files',
 				),
-			}
+			})
 		}
 
 		if (this.#rootReal) {
@@ -206,9 +207,11 @@ export class Server {
 		}
 
 		if (this.#handler) {
-			const response = await this.#handler(
-				normalizedRequest,
-				info,
+			const response = normalizeResponse(
+				await this.#handler(
+					normalizedRequest,
+					info,
+				),
 			)
 			if (
 				response.error || response.body || response.options ||
@@ -219,19 +222,21 @@ export class Server {
 		}
 
 		if (this.#defaultHandler) {
-			return await this.#defaultHandler(
-				normalizedRequest,
-				info,
+			return normalizeResponse(
+				await this.#defaultHandler(
+					normalizedRequest,
+					info,
+				),
 			)
 		}
 
-		return {
+		return new TFTPResponse({
 			error: new TFTPError(
 				normalizedRequest.method === 'GET'
 					? TFTPErrorCode.FILE_NOT_FOUND
 					: TFTPErrorCode.ACCESS_VIOLATION,
 			),
-		}
+		})
 	}
 
 	async #acceptLoop(): Promise<void> {
@@ -482,16 +487,16 @@ export class Server {
 				return undefined
 			}
 			const bytes = await Deno.readFile(resolved.realPath)
-			return {
+			return new TFTPResponse({
 				body: streamFromBytes(bytes),
 				options: { tsize: bytes.length },
-			}
+			})
 		} catch (error) {
 			if (isTFTPError(error)) {
 				if (error.code === TFTPErrorCode.FILE_NOT_FOUND) {
 					return undefined
 				}
-				return { error }
+				return new TFTPResponse({ error })
 			}
 			throw error
 		}
@@ -507,30 +512,38 @@ export class Server {
 		const existing = await safeLstat(target.absolutePath)
 		if (existing) {
 			if (existing.isSymlink) {
-				return {
+				return new TFTPResponse({
 					error: new TFTPError(
 						TFTPErrorCode.ACCESS_VIOLATION,
 						'Symlinks are not allowed',
 					),
-				}
+				})
 			}
 			if (!existing.isFile) {
-				return { error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION) }
+				return new TFTPResponse({
+					error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION),
+				})
 			}
 			const realPath = await Deno.realPath(target.absolutePath)
 			assertInsideRoot(this.#rootReal, realPath)
 			if (!this.#options.allowOverwrite) {
-				return { error: new TFTPError(TFTPErrorCode.FILE_EXISTS) }
+				return new TFTPResponse({
+					error: new TFTPError(TFTPErrorCode.FILE_EXISTS),
+				})
 			}
 		} else if (!this.#options.allowCreateFile) {
-			return { error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION) }
+			return new TFTPResponse({
+				error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION),
+			})
 		}
 
 		if (
 			target.parentPath !== target.nearestExistingParent &&
 			!this.#options.allowCreateDir
 		) {
-			return { error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION) }
+			return new TFTPResponse({
+				error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION),
+			})
 		}
 
 		const declaredSize = request.options.tsize
@@ -538,12 +551,12 @@ export class Server {
 			declaredSize !== undefined && this.#options.maxPutSize !== undefined &&
 			declaredSize > this.#options.maxPutSize
 		) {
-			return {
+			return new TFTPResponse({
 				error: new TFTPError(TFTPErrorCode.DISK_FULL, 'File too big'),
-			}
+			})
 		}
 
-		return {
+		return new TFTPResponse({
 			options: {
 				blksize: request.options.blksize ?? 512,
 				timeout: request.options.timeout ??
@@ -551,8 +564,16 @@ export class Server {
 				windowsize: request.options.windowsize ?? 1,
 				...(declaredSize !== undefined ? { tsize: declaredSize } : {}),
 			},
-		}
+		})
 	}
+}
+
+function normalizeResponse(
+	response: TFTPResponse | TFTPResponseInit,
+): TFTPResponse {
+	return response instanceof TFTPResponse
+		? response
+		: new TFTPResponse(response)
 }
 
 export function route(

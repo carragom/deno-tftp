@@ -66,7 +66,7 @@ Deno.test('client put uploads bytes to built-in root', async () => {
 	}
 })
 
-Deno.test('client request rejects TFTP errors', async () => {
+Deno.test('client request resolves remote TFTP errors', async () => {
 	const server = new Server(
 		() => ({
 			error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION, 'nope'),
@@ -86,7 +86,10 @@ Deno.test('client request rejects TFTP errors', async () => {
 			timeout: TEST_TIMEOUT_MS,
 			retries: TEST_RETRIES,
 		})
-		await assertRejects(() => client.get('missing.txt'))
+		const response = await client.get('missing.txt')
+		assertEquals(response.ok, false)
+		assertEquals(response.error?.code, TFTPErrorCode.ACCESS_VIOLATION)
+		assertEquals(response.error?.message, 'nope')
 	} finally {
 		await server.close()
 	}
@@ -112,6 +115,7 @@ Deno.test('client request GET overload downloads a file', async () => {
 			retries: TEST_RETRIES,
 		})
 		const response = await client.request('hello.txt', 'GET')
+		assertEquals(response.ok, true)
 		assertEquals(
 			new TextDecoder().decode(await readBodyToBytes(response.body)),
 			'hello',

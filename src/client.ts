@@ -1,11 +1,6 @@
 import { deadline, retry } from '@std/async'
 
-import type {
-	TFTPMethod,
-	TFTPMode,
-	TFTPOptions,
-	TFTPResponse,
-} from './common.ts'
+import type { TFTPMethod, TFTPMode, TFTPOptions } from './common.ts'
 import {
 	decodeAckPacket,
 	decodeDataPacket,
@@ -19,7 +14,9 @@ import {
 	TFTPErrorCode,
 	TFTPIllegalOperationError,
 	TFTPOpcode,
+	TFTPRemoteError,
 	TFTPRequest,
+	TFTPResponse,
 	TFTPUnknownTransferIdError,
 } from './common.ts'
 import type { NormalizedClientOptions } from './utils.ts'
@@ -139,6 +136,12 @@ export interface ClientRequestPutOptions extends ClientGetOptions {
  * and {@link put} for the common cases. Use the overloaded {@link request}
  * method when you want one entrypoint that can build either a GET or PUT
  * request while still keeping the API shaped around TFTP concepts.
+ *
+ * Error handling follows a fetch-like split:
+ *
+ * - remote TFTP ERROR packets resolve as {@link TFTPResponse} objects with
+ *   `ok === false` and a populated `error`
+ * - local timeout, runtime, and local protocol validation failures still throw
  */
 export class Client {
 	#options: NormalizedClientOptions
@@ -179,8 +182,19 @@ export class Client {
 	 * `tsize=0` by default so the server can report the transfer size in its
 	 * OACK when supported by RFC 2349 negotiation.
 	 *
+	 * Remote TFTP ERROR packets do not reject the returned promise. Instead, the
+	 * promise resolves to a {@link TFTPResponse} with `ok === false` and a
+	 * populated `error` field. Local timeout, runtime, and protocol validation
+	 * failures still throw.
+	 *
 	 * ```ts
 	 * const response = await client.request('boot/kernel.img', 'GET')
+	 * if (!response.ok) {
+	 *   console.error(response.error?.code, response.error?.message)
+	 *   return
+	 * }
+	 *
+	 * await response.body?.pipeTo(Deno.stdout.writable)
 	 * ```
 	 *
 	 * ```ts
@@ -188,6 +202,10 @@ export class Client {
 	 *   mode: 'netascii',
 	 *   options: { blksize: 1428, windowsize: 4 },
 	 * })
+	 *
+	 * if (!response.ok) {
+	 *   console.error(response.error?.message)
+	 * }
 	 * ```
 	 */
 	request(
@@ -202,10 +220,21 @@ export class Client {
 	 * instance defaults for request option negotiation and derives the transfer
 	 * size from the encoded payload.
 	 *
+	 * Remote TFTP ERROR packets resolve as `TFTPResponse` objects with
+	 * `ok === false`.
+	 *
 	 * ```ts
 	 * const file = await Deno.open('firmware.bin', { read: true })
-	 * await client.request('uploads/firmware.bin', 'PUT', file.readable)
+	 * const response = await client.request(
+	 *   'uploads/firmware.bin',
+	 *   'PUT',
+	 *   file.readable,
+	 * )
 	 * file.close()
+	 *
+	 * if (!response.ok) {
+	 *   console.error(response.error?.message)
+	 * }
 	 * ```
 	 */
 	request(
@@ -224,13 +253,19 @@ export class Client {
 	 * responsible for overload discrimination, path normalization, option
 	 * precedence, and construction of the effective internal {@link TFTPRequest}.
 	 * The private `#sendRequest()` method then handles the transport exchange.
+	 * Remote TFTP ERROR packets resolve as `TFTPResponse` objects with
+	 * `ok === false`.
 	 *
 	 * ```ts
-	 * await client.request('uploads/firmware.bin', 'PUT', {
+	 * const response = await client.request('uploads/firmware.bin', 'PUT', {
 	 *   body: file.readable,
 	 *   mode: 'octet',
 	 *   options: { blksize: 1468, windowsize: 4 },
 	 * })
+	 *
+	 * if (!response.ok) {
+	 *   console.error(response.error?.code, response.error?.message)
+	 * }
 	 * ```
 	 */
 	request(
@@ -339,7 +374,9 @@ export class Client {
 			)
 
 			if (readOpcode(initial.packet) === TFTPOpcode.ERROR) {
-				throw decodeErrorPacket(initial.packet)
+				return new TFTPResponse({
+					error: decodeErrorPacket(initial.packet),
+				})
 			}
 
 			const remote = initial.addr
@@ -364,6 +401,11 @@ export class Client {
 				initial.packet,
 				remoteAddr,
 			)
+		} catch (error) {
+			if (error instanceof TFTPRemoteError) {
+				return new TFTPResponse({ error })
+			}
+			throw error
 		} finally {
 			socket.close()
 		}
@@ -374,6 +416,7 @@ export class Client {
 	 *
 	 * This is the preferred convenience API for reads. It delegates to the
 	 * advanced {@link request} overloads after applying GET-specific defaults.
+	 * Remote TFTP ERROR packets resolve with `ok === false`.
 	 */
 	async get(
 		path: string,
@@ -387,6 +430,7 @@ export class Client {
 	 *
 	 * This is the preferred convenience API for writes. It delegates to the
 	 * advanced PUT request overload after providing the body explicitly.
+	 * Remote TFTP ERROR packets resolve with `ok === false`.
 	 */
 	async put(
 		path: string,
@@ -432,7 +476,7 @@ export class Client {
 		lastAck = lastBlock
 		void lastAck
 
-		return {
+		return new TFTPResponse({
 			body: streamFromBytes(
 				request.mode === 'netascii' ? decodeNetascii(data) : data,
 			),
@@ -444,7 +488,7 @@ export class Client {
 					? { tsize: negotiated.tsize }
 					: {}),
 			},
-		}
+		})
 	}
 
 	async #handlePut(
@@ -465,14 +509,14 @@ export class Client {
 			this.#options.retries,
 		)
 
-		return {
+		return new TFTPResponse({
 			options: {
 				blksize: negotiated.blksize,
 				timeout: Math.max(1, Math.floor(negotiated.timeoutMs / 1000)),
 				windowsize: negotiated.windowsize,
 				tsize: data.length,
 			},
-		}
+		})
 	}
 }
 

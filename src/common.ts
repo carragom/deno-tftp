@@ -33,6 +33,15 @@ export class OperationTimeoutError extends Error {
 	}
 }
 
+/** Remote TFTP ERROR packet decoded from the wire. */
+export class TFTPRemoteError extends TFTPError {
+	constructor(code: number, message?: string) {
+		super(code, message)
+		this.name = 'TFTPRemoteError'
+		Object.setPrototypeOf(this, new.target.prototype)
+	}
+}
+
 export class TFTPUnknownTransferIdError extends TFTPError {
 	constructor(message?: string) {
 		super(TFTPErrorCode.UNKNOWN_TRANSFER_ID, message)
@@ -116,11 +125,39 @@ export class TFTPRequest {
 	}
 }
 
-export interface TFTPResponse {
+export interface TFTPResponseInit {
 	body?: ReadableStream<Uint8Array>
 	options?: Partial<TFTPOptions>
 	extensions?: Record<string, string>
 	error?: TFTPError
+}
+
+/**
+ * TFTP response returned by client operations and used by server handlers.
+ *
+ * A response is successful when it does not carry a remote TFTP ERROR result.
+ */
+export class TFTPResponse {
+	readonly body?: ReadableStream<Uint8Array>
+	readonly options?: Readonly<Partial<TFTPOptions>>
+	readonly extensions?: Readonly<Record<string, string>>
+	readonly error?: TFTPError
+
+	constructor(init: TFTPResponseInit = {}) {
+		this.body = init.body
+		this.options = init.options
+			? Object.freeze({ ...init.options })
+			: undefined
+		this.extensions = init.extensions
+			? Object.freeze({ ...init.extensions })
+			: undefined
+		this.error = init.error
+	}
+
+	/** Whether the response does not carry a remote TFTP ERROR packet. */
+	get ok(): boolean {
+		return this.error === undefined
+	}
 }
 
 export interface TFTPEndpoint {
@@ -136,7 +173,7 @@ export interface TFTPServeHandlerInfo {
 export type TFTPHandler = (
 	request: TFTPRequest,
 	info: TFTPServeHandlerInfo,
-) => TFTPResponse | Promise<TFTPResponse>
+) => TFTPResponse | TFTPResponseInit | Promise<TFTPResponse | TFTPResponseInit>
 
 export interface TFTPRoute {
 	pattern: URLPattern
@@ -365,7 +402,7 @@ export function encodeErrorPacket(error: TFTPError): Uint8Array {
 	)
 }
 
-export function decodeErrorPacket(packet: Uint8Array): TFTPError {
+export function decodeErrorPacket(packet: Uint8Array): TFTPRemoteError {
 	const view = new DataView(
 		packet.buffer,
 		packet.byteOffset,
@@ -376,20 +413,10 @@ export function decodeErrorPacket(packet: Uint8Array): TFTPError {
 	}
 	const fields = decodeZeroTerminatedFields(packet, 4)
 	const code = view.getUint16(2)
-	return instantiateTFTPError(
+	return new TFTPRemoteError(
 		code,
 		fields[0] ?? TFTPErrorMessage[TFTPErrorCode.NOT_DEFINED],
 	)
-}
-
-function instantiateTFTPError(code: number, message?: string): TFTPError {
-	if (code === TFTPErrorCode.UNKNOWN_TRANSFER_ID) {
-		return new TFTPUnknownTransferIdError(message)
-	}
-	if (code === TFTPErrorCode.ILLEGAL_OPERATION) {
-		return new TFTPIllegalOperationError(message)
-	}
-	return new TFTPError(code, message)
 }
 
 export function encodeOptionsAckPacket(
