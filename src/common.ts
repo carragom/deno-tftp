@@ -45,13 +45,75 @@ export class TFTPIllegalOperationError extends TFTPError {
 	}
 }
 
-export interface TFTPRequest {
+export interface TFTPRequestInit {
 	method: TFTPMethod
 	path: string
-	mode: TFTPMode
-	options: Readonly<TFTPOptions>
-	extensions: Readonly<Record<string, string>>
+	mode?: TFTPMode
+	options?: Partial<TFTPOptions>
+	extensions?: Record<string, string>
 	body?: ReadableStream<Uint8Array>
+}
+
+export class TFTPRequest {
+	readonly method: TFTPMethod
+	readonly path: string
+	readonly mode: TFTPMode
+	readonly options: Readonly<TFTPOptions>
+	readonly extensions: Readonly<Record<string, string>>
+	readonly body?: ReadableStream<Uint8Array>
+
+	constructor(init: TFTPRequestInit) {
+		this.method = init.method
+		this.path = init.path
+		this.mode = init.mode ?? TFTPDefaultTransferMode
+		this.options = Object.freeze({ ...(init.options ?? {}) })
+		this.extensions = Object.freeze({ ...(init.extensions ?? {}) })
+		this.body = init.body
+	}
+
+	static encode(request: TFTPRequest): Uint8Array {
+		const opcode = request.method === 'GET' ? TFTPOpcode.RRQ : TFTPOpcode.WRQ
+		const pairs: Array<[string, string]> = []
+
+		for (
+			const key of Object.keys(request.options) as Array<keyof TFTPOptions>
+		) {
+			const value = request.options[key]
+			if (value === undefined) continue
+			pairs.push([key, String(value)])
+		}
+
+		for (const [key, value] of Object.entries(request.extensions)) {
+			if (TFTPKnownExtensionKeys.has(key as keyof TFTPOptions)) continue
+			pairs.push([key, value])
+		}
+
+		const buffer = encodeZeroTerminatedFields([
+			request.path,
+			request.mode,
+			...pairs.flat(),
+		], opcode)
+
+		if (buffer.length > TFTPRequestPacketLimit) {
+			throw new TFTPError(
+				TFTPErrorCode.NOT_DEFINED,
+				'Request bigger than 512 bytes',
+			)
+		}
+
+		return buffer
+	}
+
+	with(init: Partial<TFTPRequestInit>): TFTPRequest {
+		return new TFTPRequest({
+			method: init.method ?? this.method,
+			path: init.path ?? this.path,
+			mode: init.mode ?? this.mode,
+			options: init.options ?? this.options,
+			extensions: init.extensions ?? this.extensions,
+			body: init.body ?? this.body,
+		})
+	}
 }
 
 export interface TFTPResponse {
@@ -80,25 +142,6 @@ export interface TFTPRoute {
 	pattern: URLPattern
 	method?: TFTPMethod | TFTPMethod[]
 	handler: TFTPHandler
-}
-
-export interface ClientOptions {
-	host?: string
-	port?: number
-	blockSize?: number
-	windowSize?: number
-	timeout?: number
-	retries?: number
-}
-
-export interface ClientGetOptions {
-	mode?: TFTPMode
-	options?: Partial<TFTPOptions>
-	extensions?: Record<string, string>
-}
-
-export interface ClientPutOptions extends ClientGetOptions {
-	size?: number
 }
 
 export interface ServerOptions {
@@ -207,57 +250,6 @@ export interface ParsedAckPacket {
 export interface ParsedOptionsAckPacket {
 	options: Partial<TFTPOptions>
 	extensions: Record<string, string>
-}
-
-export function createRequest(
-	method: TFTPMethod,
-	path: string,
-	init: {
-		mode?: TFTPMode
-		options?: Partial<TFTPOptions>
-		extensions?: Record<string, string>
-		body?: ReadableStream<Uint8Array>
-	} = {},
-): TFTPRequest {
-	return {
-		method,
-		path,
-		mode: init.mode ?? TFTPDefaultTransferMode,
-		options: Object.freeze({ ...(init.options ?? {}) }),
-		extensions: Object.freeze({ ...(init.extensions ?? {}) }),
-		body: init.body,
-	}
-}
-
-export function encodeRequestPacket(request: TFTPRequest): Uint8Array {
-	const opcode = request.method === 'GET' ? TFTPOpcode.RRQ : TFTPOpcode.WRQ
-	const pairs: Array<[string, string]> = []
-
-	for (const key of Object.keys(request.options) as Array<keyof TFTPOptions>) {
-		const value = request.options[key]
-		if (value === undefined) continue
-		pairs.push([key, String(value)])
-	}
-
-	for (const [key, value] of Object.entries(request.extensions)) {
-		if (TFTPKnownExtensionKeys.has(key as keyof TFTPOptions)) continue
-		pairs.push([key, value])
-	}
-
-	const buffer = encodeZeroTerminatedFields([
-		request.path,
-		request.mode,
-		...pairs.flat(),
-	], opcode)
-
-	if (buffer.length > TFTPRequestPacketLimit) {
-		throw new TFTPError(
-			TFTPErrorCode.NOT_DEFINED,
-			'Request bigger than 512 bytes',
-		)
-	}
-
-	return buffer
 }
 
 export function decodeRequestPacket(packet: Uint8Array): ParsedRequestPacket {

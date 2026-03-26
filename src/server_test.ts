@@ -1,6 +1,6 @@
 import { assertEquals } from '@std/assert'
 
-import { createRequest, TFTPError, TFTPErrorCode } from './common.ts'
+import { TFTPError, TFTPErrorCode, TFTPRequest } from './common.ts'
 import { route, Server } from './server.ts'
 import { readBodyToBytes, streamFromBytes } from './utils.ts'
 
@@ -20,7 +20,10 @@ Deno.test('server serves existing regular file before custom handler', async () 
 	)
 	await server.listen()
 	try {
-		const response = await server.request(createRequest('GET', 'hello.txt'), {
+		const response = await server.request({
+			method: 'GET',
+			path: 'hello.txt',
+		}, {
 			address: '127.0.0.1',
 			port: 9999,
 		})
@@ -48,7 +51,7 @@ Deno.test('server route handles dynamic request', async () => {
 	await server.listen()
 	try {
 		const response = await server.request(
-			createRequest('GET', 'hello/world'),
+			{ method: 'GET', path: 'hello/world' },
 			{
 				address: '127.0.0.1',
 				port: 9999,
@@ -63,6 +66,46 @@ Deno.test('server route handles dynamic request', async () => {
 	}
 })
 
+Deno.test('server request accepts request init objects', async () => {
+	const root = await Deno.makeTempDir()
+	await Deno.writeTextFile(`${root}/hello.txt`, 'root')
+
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
+	await server.listen()
+	try {
+		const response = await server.request(
+			{ method: 'GET', path: 'hello.txt' },
+			{ address: '127.0.0.1', port: 9999 },
+		)
+		assertEquals(
+			new TextDecoder().decode(await readBodyToBytes(response.body)),
+			'root',
+		)
+	} finally {
+		await server.close()
+	}
+})
+
+Deno.test('server request accepts request instances', async () => {
+	const root = await Deno.makeTempDir()
+	await Deno.writeTextFile(`${root}/hello.txt`, 'root')
+
+	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
+	await server.listen()
+	try {
+		const response = await server.request(
+			new TFTPRequest({ method: 'GET', path: 'hello.txt' }),
+			{ address: '127.0.0.1', port: 9999 },
+		)
+		assertEquals(
+			new TextDecoder().decode(await readBodyToBytes(response.body)),
+			'root',
+		)
+	} finally {
+		await server.close()
+	}
+})
+
 Deno.test('server rejects overwrite by default', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/file.txt`, 'old')
@@ -70,9 +113,11 @@ Deno.test('server rejects overwrite by default', async () => {
 	await server.listen()
 	try {
 		const response = await server.request(
-			createRequest('PUT', 'file.txt', {
+			{
+				method: 'PUT',
+				path: 'file.txt',
 				body: streamFromBytes(new TextEncoder().encode('new')),
-			}),
+			},
 			{ address: '127.0.0.1', port: 9999 },
 		)
 		assertEquals(response.error?.code, TFTPErrorCode.FILE_EXISTS)
@@ -92,9 +137,11 @@ Deno.test('server creates directories recursively when enabled', async () => {
 	await server.listen()
 	try {
 		const response = await server.request(
-			createRequest('PUT', 'nested/path/file.txt', {
+			{
+				method: 'PUT',
+				path: 'nested/path/file.txt',
 				body: streamFromBytes(new TextEncoder().encode('value')),
-			}),
+			},
 			{ address: '127.0.0.1', port: 9999 },
 		)
 		assertEquals(response.error, undefined)
@@ -118,10 +165,12 @@ Deno.test('server enforces maxPutSize', async () => {
 	await server.listen()
 	try {
 		const response = await server.request(
-			createRequest('PUT', 'file.txt', {
+			{
+				method: 'PUT',
+				path: 'file.txt',
 				options: { tsize: 3 },
 				body: streamFromBytes(new TextEncoder().encode('abc')),
-			}),
+			},
 			{ address: '127.0.0.1', port: 9999 },
 		)
 		assertEquals(response.error?.code, TFTPErrorCode.DISK_FULL)

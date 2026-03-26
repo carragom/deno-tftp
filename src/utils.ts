@@ -9,12 +9,10 @@ import {
 } from '@std/path'
 
 import {
-	createRequest,
 	TFTPDefaultBlockSize,
 	TFTPDefaultPort,
 	TFTPDefaultRetries,
 	TFTPDefaultTimeout,
-	TFTPDefaultTransferMode,
 	TFTPDefaultWindowSize,
 	TFTPError,
 	TFTPErrorCode,
@@ -23,13 +21,7 @@ import {
 	TFTPMinBlockSize,
 	TFTPMinWindowSize,
 } from './common.ts'
-import type {
-	TFTPMethod,
-	TFTPMode,
-	TFTPOptions,
-	TFTPRequest,
-	TFTPResponse,
-} from './common.ts'
+import type { TFTPMode, TFTPOptions, TFTPResponse } from './common.ts'
 
 export interface NormalizedClientOptions {
 	host: string
@@ -122,41 +114,6 @@ export function normalizeServerOptions(options: {
 		maxPutSize: options.maxPutSize,
 	}
 }
-
-export function mergeRequestOptions(
-	defaults: TFTPOptions,
-	overrides: Partial<TFTPOptions> | undefined,
-): TFTPOptions {
-	return {
-		...defaults,
-		...(overrides ?? {}),
-	}
-}
-
-export function createClientRequest(
-	method: TFTPMethod,
-	path: string,
-	init: {
-		mode?: TFTPMode
-		options?: Partial<TFTPOptions>
-		extensions?: Record<string, string>
-		body?: ReadableStream<Uint8Array>
-	},
-	clientOptions: NormalizedClientOptions,
-): TFTPRequest {
-	return createRequest(method, normalizeTFTPPath(path), {
-		mode: init.mode ?? TFTPDefaultTransferMode,
-		options: mergeRequestOptions({
-			blksize: clientOptions.blockSize,
-			timeout: Math.max(1, Math.floor(clientOptions.timeout / 1000)),
-			windowsize: clientOptions.windowSize,
-			...(method === 'GET' ? { tsize: 0 } : {}),
-		}, init.options),
-		extensions: init.extensions,
-		body: init.body,
-	})
-}
-
 export function normalizeTFTPPath(path: string): string {
 	if (path.includes('\0')) {
 		throw new Error('TFTP paths cannot contain NUL bytes')

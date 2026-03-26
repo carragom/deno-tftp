@@ -49,6 +49,18 @@
  * file.close()
  * ```
  *
+ * Use the advanced request API:
+ *
+ * ```ts
+ * import { Client } from './mod.ts'
+ *
+ * const client = new Client({ host: '127.0.0.1', port: 1069 })
+ * const response = await client.request('boot/kernel.img', 'GET', {
+ *   options: { blksize: 1468, windowsize: 4 },
+ * })
+ * await response.body?.pipeTo(Deno.stdout.writable)
+ * ```
+ *
  * Start a root-backed server:
  *
  * ```ts
@@ -93,6 +105,29 @@
  * @module
  */
 
-export * from './src/common.ts'
 export { Client } from './src/client.ts'
 export { route, Server } from './src/server.ts'
+export {
+	OperationTimeoutError,
+	TFTPError,
+	TFTPErrorCode,
+} from './src/common.ts'
+export type {
+	ServerOptions,
+	TFTPEndpoint,
+	TFTPHandler,
+	TFTPMethod,
+	TFTPMode,
+	TFTPOptions,
+	TFTPRequest,
+	TFTPRequestInit,
+	TFTPResponse,
+	TFTPRoute,
+	TFTPServeHandlerInfo,
+} from './src/common.ts'
+export type {
+	ClientGetOptions,
+	ClientOptions,
+	ClientPutOptions,
+	ClientRequestPutOptions,
+} from './src/client.ts'

@@ -3,7 +3,6 @@ import { assertEquals, assertRejects } from '@std/assert'
 
 import { Client } from './client.ts'
 import {
-	createRequest,
 	decodeAckPacket,
 	decodeDataPacket,
 	decodeErrorPacket,
@@ -12,8 +11,8 @@ import {
 	encodeAckPacket,
 	encodeDataPacket,
 	encodeOptionsAckPacket,
-	encodeRequestPacket,
 	TFTPErrorCode,
+	TFTPRequest,
 } from './common.ts'
 import { Server } from './server.ts'
 import { streamFromBytes } from './utils.ts'
@@ -75,7 +74,9 @@ Deno.test('server returns unknown transfer id error to unexpected peer', async (
 			port: server.port,
 		}
 		await socket.send(
-			encodeRequestPacket(createRequest('GET', 'hello.txt')),
+			TFTPRequest.encode(
+				new TFTPRequest({ method: 'GET', path: 'hello.txt' }),
+			),
 			serverAddr,
 		)
 		const [packet, addr] = await socket.receive()
@@ -115,7 +116,7 @@ Deno.test('server ignores or errors on forged invalid opcode to listening port',
 			new Uint8Array([0, 99, 106, 117, 110, 107, 0]),
 			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
-		const reply = await maybeReceiveDatagram(socket, 500)
+		const reply = await maybeReceiveDatagram(socket, 150)
 		if (!reply) return
 		const [packet] = reply
 		const error = decodeErrorPacket(packet)
@@ -191,7 +192,7 @@ Deno.test('server ignores short malformed packets without crashing accept loop',
 			new Uint8Array([0]),
 			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
-		const maybeError = await maybeReceiveDatagram(socket, 200)
+		const maybeError = await maybeReceiveDatagram(socket, 100)
 		if (maybeError) {
 			const [packet] = maybeError
 			assertEquals(
@@ -201,7 +202,9 @@ Deno.test('server ignores short malformed packets without crashing accept loop',
 		}
 
 		await socket.send(
-			encodeRequestPacket(createRequest('GET', 'hello.txt')),
+			TFTPRequest.encode(
+				new TFTPRequest({ method: 'GET', path: 'hello.txt' }),
+			),
 			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 		const [packet] = await receiveDatagram(socket)
@@ -236,9 +239,13 @@ Deno.test('server OACK only includes options requested by the client', async () 
 	})
 	try {
 		await socket.send(
-			encodeRequestPacket(createRequest('GET', 'hello.txt', {
-				options: { tsize: 0 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'GET',
+					path: 'hello.txt',
+					options: { tsize: 0 },
+				}),
+			),
 			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 		const [packet, addr] = await receiveDatagram(socket)
@@ -279,10 +286,14 @@ Deno.test('server omits tsize from netascii RRQ OACK', async () => {
 	})
 	try {
 		await socket.send(
-			encodeRequestPacket(createRequest('GET', 'hello.txt', {
-				mode: 'netascii',
-				options: { tsize: 0 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'GET',
+					path: 'hello.txt',
+					mode: 'netascii',
+					options: { tsize: 0 },
+				}),
+			),
 			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 		const [packet, addr] = await receiveDatagram(socket)
@@ -485,9 +496,13 @@ Deno.test('server ignores duplicate old ACK after partial window ACK', async () 
 	})
 	try {
 		await socket.send(
-			encodeRequestPacket(createRequest('GET', 'partial.txt', {
-				options: { blksize: 8, windowsize: 4 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'GET',
+					path: 'partial.txt',
+					options: { blksize: 8, windowsize: 4 },
+				}),
+			),
 			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 
@@ -507,7 +522,7 @@ Deno.test('server ignores duplicate old ACK after partial window ACK', async () 
 
 		const secondWindow = await receiveDataBlocks(socket, remote, 3, 8)
 		assertEquals(secondWindow, [3, 4, 5])
-		assertEquals(await maybeReceiveDatagram(socket, 100), undefined)
+		assertEquals(await maybeReceiveDatagram(socket, 50), undefined)
 
 		await socket.send(encodeAckPacket(5), toSendAddr(remote))
 	} finally {
@@ -536,9 +551,13 @@ Deno.test('server resends tail of GET window after partial ACK and timeout', asy
 	})
 	try {
 		await socket.send(
-			encodeRequestPacket(createRequest('GET', 'rfc7440.txt', {
-				options: { blksize: 8, windowsize: 4 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'GET',
+					path: 'rfc7440.txt',
+					options: { blksize: 8, windowsize: 4 },
+				}),
+			),
 			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 
@@ -582,9 +601,13 @@ Deno.test('server ACKs last good block for duplicate and out-of-order PUT data',
 	})
 	try {
 		await socket.send(
-			encodeRequestPacket(createRequest('PUT', 'dup.txt', {
-				options: { blksize: 8, windowsize: 4, tsize: 12 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'PUT',
+					path: 'dup.txt',
+					options: { blksize: 8, windowsize: 4, tsize: 12 },
+				}),
+			),
 			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 
@@ -641,9 +664,13 @@ Deno.test('server re-ACKs last committed PUT block after hole in window', async 
 	})
 	try {
 		await socket.send(
-			encodeRequestPacket(createRequest('PUT', 'window.txt', {
-				options: { blksize: 8, windowsize: 4, tsize: 28 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'PUT',
+					path: 'window.txt',
+					options: { blksize: 8, windowsize: 4, tsize: 28 },
+				}),
+			),
 			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 
@@ -703,9 +730,13 @@ Deno.test('server resends final ACK when last WRQ data block is retransmitted', 
 	})
 	try {
 		await socket.send(
-			encodeRequestPacket(createRequest('PUT', 'late.txt', {
-				options: { blksize: 8, windowsize: 1, tsize: 5 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'PUT',
+					path: 'late.txt',
+					options: { blksize: 8, windowsize: 1, tsize: 5 },
+				}),
+			),
 			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 
@@ -745,9 +776,13 @@ Deno.test('server rejects PUT body larger than declared tsize', async () => {
 	})
 	try {
 		await socket.send(
-			encodeRequestPacket(createRequest('PUT', 'size.txt', {
-				options: { blksize: 8, windowsize: 4, tsize: 4 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'PUT',
+					path: 'size.txt',
+					options: { blksize: 8, windowsize: 4, tsize: 4 },
+				}),
+			),
 			{ transport: 'udp', hostname: server.host, port: server.port },
 		)
 

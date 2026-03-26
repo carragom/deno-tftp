@@ -76,6 +76,20 @@ await client.put('uploads/firmware.bin', file.readable)
 file.close()
 ```
 
+Use the advanced request API:
+
+```ts
+import { Client } from './mod.ts'
+
+const client = new Client({ host: '127.0.0.1', port: 69 })
+const response = await client.request('boot/kernel.img', 'GET', {
+	options: { blksize: 1468, windowsize: 4 },
+})
+
+if (!response.body) throw new Error('Missing response body')
+await response.body.pipeTo(Deno.stdout.writable)
+```
+
 Serve files from a root directory:
 
 ```ts

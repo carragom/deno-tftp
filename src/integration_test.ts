@@ -9,6 +9,8 @@ import {
 } from './utils.ts'
 
 const interopServerValue = Deno.env.get('TEST_INTEROP_SERVER')
+const TEST_TIMEOUT_MS = 150
+const TEST_RETRIES = 1
 const interopServers = interopServerValue
 	? parseInteropServers(interopServerValue)
 	: []
@@ -22,10 +24,21 @@ Deno.test('client and server interoperate in-process', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
 
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
+	const server = new Server(undefined, {
+		host: '127.0.0.1',
+		port: 0,
+		root,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
+	})
 	await server.listen()
 	try {
-		const client = new Client({ host: server.host, port: server.port })
+		const client = new Client({
+			host: server.host,
+			port: server.port,
+			timeout: TEST_TIMEOUT_MS,
+			retries: TEST_RETRIES,
+		})
 		const getResponse = await client.get('hello.txt')
 		assertEquals(
 			new TextDecoder().decode(await readBodyToBytes(getResponse.body)),
@@ -53,6 +66,8 @@ Deno.test('client and server negotiate windowsize and blocksize in-process', asy
 		root,
 		blockSize: 1024,
 		windowSize: 4,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
 	})
 	await server.listen()
 	try {
@@ -61,6 +76,8 @@ Deno.test('client and server negotiate windowsize and blocksize in-process', asy
 			port: server.port,
 			blockSize: 1024,
 			windowSize: 4,
+			timeout: TEST_TIMEOUT_MS,
+			retries: TEST_RETRIES,
 		})
 		const response = await client.get('big.txt')
 		assertEquals(
@@ -79,11 +96,22 @@ Deno.test('client and server handle concurrent RRQ in-process', async () => {
 	const payload = 'x'.repeat(4096)
 	await Deno.writeTextFile(`${root}/shared.txt`, payload)
 
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
+	const server = new Server(undefined, {
+		host: '127.0.0.1',
+		port: 0,
+		root,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
+	})
 	await server.listen()
 	try {
 		const jobs = Array.from({ length: 8 }, async () => {
-			const client = new Client({ host: server.host, port: server.port })
+			const client = new Client({
+				host: server.host,
+				port: server.port,
+				timeout: TEST_TIMEOUT_MS,
+				retries: TEST_RETRIES,
+			})
 			const response = await client.get('shared.txt')
 			return new TextDecoder().decode(await readBodyToBytes(response.body))
 		})
@@ -95,11 +123,22 @@ Deno.test('client and server handle concurrent RRQ in-process', async () => {
 
 Deno.test('client and server handle concurrent WRQ in-process', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
+	const server = new Server(undefined, {
+		host: '127.0.0.1',
+		port: 0,
+		root,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
+	})
 	await server.listen()
 	try {
 		await Promise.all(Array.from({ length: 6 }, async (_, index) => {
-			const client = new Client({ host: server.host, port: server.port })
+			const client = new Client({
+				host: server.host,
+				port: server.port,
+				timeout: TEST_TIMEOUT_MS,
+				retries: TEST_RETRIES,
+			})
 			const body = `upload-${index}`
 			await client.put(
 				`upload-${index}.txt`,
@@ -119,13 +158,21 @@ Deno.test('client and server translate netascii on GET in-process', async () => 
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/unix.txt`, 'foo\nbar\rbaz\n')
 
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
+	const server = new Server(undefined, {
+		host: '127.0.0.1',
+		port: 0,
+		root,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
+	})
 	await server.listen()
 	try {
 		const client = new Client({
 			host: server.host,
 			port: server.port,
 			blockSize: 64,
+			timeout: TEST_TIMEOUT_MS,
+			retries: TEST_RETRIES,
 		})
 		const response = await client.get('unix.txt', { mode: 'netascii' })
 		assertEquals(
@@ -139,13 +186,21 @@ Deno.test('client and server translate netascii on GET in-process', async () => 
 
 Deno.test('client and server translate netascii on PUT in-process', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
+	const server = new Server(undefined, {
+		host: '127.0.0.1',
+		port: 0,
+		root,
+		timeout: TEST_TIMEOUT_MS,
+		retries: TEST_RETRIES,
+	})
 	await server.listen()
 	try {
 		const client = new Client({
 			host: server.host,
 			port: server.port,
 			blockSize: 64,
+			timeout: TEST_TIMEOUT_MS,
+			retries: TEST_RETRIES,
 		})
 		await client.put(
 			'unix.txt',

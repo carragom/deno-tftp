@@ -1,7 +1,6 @@
 import { assertEquals, assertThrows } from '@std/assert'
 
 import {
-	createRequest,
 	decodeAckPacket,
 	decodeDataPacket,
 	decodeErrorPacket,
@@ -11,22 +10,55 @@ import {
 	encodeDataPacket,
 	encodeErrorPacket,
 	encodeOptionsAckPacket,
-	encodeRequestPacket,
 	TFTPError,
 	TFTPErrorCode,
 	TFTPMaxBlockSize,
 	TFTPMaxTimeoutSeconds,
 	TFTPMinBlockSize,
 	TFTPMinTimeoutSeconds,
+	TFTPRequest,
 } from './common.ts'
 
+Deno.test('request class normalizes defaults and freezes maps', () => {
+	const request = new TFTPRequest({
+		method: 'GET',
+		path: 'boot/file.bin',
+	})
+
+	assertEquals(request.mode, 'octet')
+	assertEquals(request.options, {})
+	assertEquals(request.extensions, {})
+	assertThrows(() => {
+		;(request.options as { blksize?: number }).blksize = 1
+	}, TypeError)
+	assertThrows(() => {
+		;(request.extensions as Record<string, string>).token = 'abc'
+	}, TypeError)
+})
+
+Deno.test('request with clones overrides', () => {
+	const request = new TFTPRequest({
+		method: 'GET',
+		path: 'boot/file.bin',
+		options: { blksize: 1468 },
+	})
+
+	const next = request.with({ path: 'next/file.bin', mode: 'netascii' })
+	assertEquals(next.path, 'next/file.bin')
+	assertEquals(next.mode, 'netascii')
+	assertEquals(next.options.blksize, 1468)
+	assertEquals(request.path, 'boot/file.bin')
+})
+
 Deno.test('request packet round-trips', () => {
-	const request = createRequest('GET', 'boot/file.bin', {
+	const request = new TFTPRequest({
+		method: 'GET',
+		path: 'boot/file.bin',
 		options: { blksize: 1468, timeout: 3, tsize: 0, windowsize: 4 },
 		extensions: { token: 'abc' },
 	})
 
-	const decoded = decodeRequestPacket(encodeRequestPacket(request))
+	const decoded = decodeRequestPacket(TFTPRequest.encode(request))
 	assertEquals(decoded.method, 'GET')
 	assertEquals(decoded.path, 'boot/file.bin')
 	assertEquals(decoded.mode, 'octet')
@@ -35,10 +67,12 @@ Deno.test('request packet round-trips', () => {
 })
 
 Deno.test('request packet rejects oversize message', () => {
-	const request = createRequest('GET', 'x', {
+	const request = new TFTPRequest({
+		method: 'GET',
+		path: 'x',
 		extensions: { giant: 'a'.repeat(600) },
 	})
-	assertThrows(() => encodeRequestPacket(request))
+	assertThrows(() => TFTPRequest.encode(request))
 })
 
 Deno.test('data packet round-trips', () => {
@@ -85,16 +119,24 @@ Deno.test('request decode rejects invalid mode', () => {
 Deno.test('request decode rejects invalid block size options', () => {
 	assertThrows(() =>
 		decodeRequestPacket(
-			encodeRequestPacket(createRequest('GET', 'foo', {
-				options: { blksize: TFTPMinBlockSize - 1 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'GET',
+					path: 'foo',
+					options: { blksize: TFTPMinBlockSize - 1 },
+				}),
+			),
 		)
 	)
 	assertThrows(() =>
 		decodeRequestPacket(
-			encodeRequestPacket(createRequest('GET', 'foo', {
-				options: { blksize: TFTPMaxBlockSize + 1 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'GET',
+					path: 'foo',
+					options: { blksize: TFTPMaxBlockSize + 1 },
+				}),
+			),
 		)
 	)
 })
@@ -102,16 +144,24 @@ Deno.test('request decode rejects invalid block size options', () => {
 Deno.test('request decode rejects invalid timeout options', () => {
 	assertThrows(() =>
 		decodeRequestPacket(
-			encodeRequestPacket(createRequest('GET', 'foo', {
-				options: { timeout: TFTPMinTimeoutSeconds - 1 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'GET',
+					path: 'foo',
+					options: { timeout: TFTPMinTimeoutSeconds - 1 },
+				}),
+			),
 		)
 	)
 	assertThrows(() =>
 		decodeRequestPacket(
-			encodeRequestPacket(createRequest('GET', 'foo', {
-				options: { timeout: TFTPMaxTimeoutSeconds + 1 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'GET',
+					path: 'foo',
+					options: { timeout: TFTPMaxTimeoutSeconds + 1 },
+				}),
+			),
 		)
 	)
 })
@@ -119,9 +169,13 @@ Deno.test('request decode rejects invalid timeout options', () => {
 Deno.test('request decode rejects non-zero GET tsize', () => {
 	assertThrows(() =>
 		decodeRequestPacket(
-			encodeRequestPacket(createRequest('GET', 'foo', {
-				options: { tsize: 1 },
-			})),
+			TFTPRequest.encode(
+				new TFTPRequest({
+					method: 'GET',
+					path: 'foo',
+					options: { tsize: 1 },
+				}),
+			),
 		)
 	)
 })

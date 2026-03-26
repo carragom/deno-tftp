@@ -1,5 +1,11 @@
 import { deadline, retry } from '@std/async'
 
+import type {
+	TFTPMethod,
+	TFTPMode,
+	TFTPOptions,
+	TFTPResponse,
+} from './common.ts'
 import {
 	decodeAckPacket,
 	decodeDataPacket,
@@ -8,30 +14,23 @@ import {
 	encodeAckPacket,
 	encodeDataPacket,
 	encodeErrorPacket,
-	encodeRequestPacket,
 	OperationTimeoutError,
 	TFTPError,
 	TFTPErrorCode,
 	TFTPIllegalOperationError,
 	TFTPOpcode,
+	TFTPRequest,
 	TFTPUnknownTransferIdError,
 } from './common.ts'
-import type {
-	ClientGetOptions,
-	ClientOptions,
-	ClientPutOptions,
-	TFTPRequest,
-	TFTPResponse,
-} from './common.ts'
+import type { NormalizedClientOptions } from './utils.ts'
 import {
-	createClientRequest,
 	decodeNetascii,
 	encodeNetascii,
 	normalizeClientOptions,
+	normalizeTFTPPath,
 	readBodyToBytes,
 	streamFromBytes,
 } from './utils.ts'
-import type { NormalizedClientOptions } from './utils.ts'
 
 type UdpAddr = Deno.NetAddr & { transport: 'udp' }
 
@@ -42,22 +41,279 @@ interface NegotiatedTransferOptions {
 	tsize?: number
 }
 
+/**
+ * Client-wide defaults for advanced and convenience request APIs.
+ *
+ * These values set the remote endpoint and the default TFTP option negotiation
+ * behavior for requests created by this client instance.
+ */
+export interface ClientOptions {
+	/** Remote TFTP server hostname or IP address. Defaults to `127.0.0.1`. */
+	host?: string
+	/** Remote TFTP server port. Defaults to `69`. */
+	port?: number
+	/**
+	 * Default requested block size for transfers created by this client.
+	 *
+	 * Per-call request options override this value.
+	 */
+	blockSize?: number
+	/**
+	 * Default requested windowsize for transfers created by this client.
+	 *
+	 * Per-call request options override this value.
+	 */
+	windowSize?: number
+	/**
+	 * Default requested transfer timeout in milliseconds.
+	 *
+	 * The client requests whole-second timeout values on the wire and uses this
+	 * value for local receive deadlines.
+	 */
+	timeout?: number
+	/**
+	 * Number of retransmission attempts for timed-out operations.
+	 *
+	 * This controls local retry behavior, not the on-wire TFTP `timeout` option.
+	 */
+	retries?: number
+}
+
+/**
+ * Additional options for GET requests.
+ *
+ * All properties are optional. Missing values fall back to the client instance
+ * defaults and then to the built-in constructor defaults used for the client.
+ */
+export interface ClientGetOptions {
+	/** Transfer mode. Defaults to `octet`. */
+	mode?: TFTPMode
+	/**
+	 * Requested standard RFC option negotiation values.
+	 *
+	 * These values override the instance defaults for this request only.
+	 */
+	options?: Partial<TFTPOptions>
+	/**
+	 * Additional non-standard extension pairs to include in the request.
+	 *
+	 * Standard TFTP option keys should go in `options` instead.
+	 */
+	extensions?: Record<string, string>
+}
+
+/**
+ * Additional options for PUT convenience requests.
+ *
+ * These options are used by {@link Client.put} and extend the GET request
+ * options with optional explicit transfer size metadata.
+ */
+export interface ClientPutOptions extends ClientGetOptions {
+	/**
+	 * Declared transfer size in octets.
+	 *
+	 * When omitted, {@link Client.put} uses the encoded payload size.
+	 */
+	size?: number
+}
+
+/**
+ * Additional options for advanced PUT requests made through {@link Client.request}.
+ */
+export interface ClientRequestPutOptions extends ClientGetOptions {
+	/** Request body to upload. */
+	body: ReadableStream<Uint8Array>
+	/**
+	 * Declared transfer size in octets.
+	 *
+	 * When omitted, the encoded payload size is used.
+	 */
+	size?: number
+}
+
+/**
+ * Stateful TFTP client bound to one remote endpoint.
+ *
+ * A client instance owns the remote host and port and also carries default TFTP
+ * option negotiation values used by its request-building APIs. Use {@link get}
+ * and {@link put} for the common cases. Use the overloaded {@link request}
+ * method when you want one entrypoint that can build either a GET or PUT
+ * request while still keeping the API shaped around TFTP concepts.
+ */
 export class Client {
 	#options: NormalizedClientOptions
 
+	/**
+	 * Creates a client bound to one remote TFTP server.
+	 *
+	 * The provided options become instance defaults. Per-call request options
+	 * override them. Any missing values fall back to the library defaults.
+	 */
 	constructor(options: ClientOptions = {}) {
 		this.#options = normalizeClientOptions(options)
 	}
 
+	/** Configured remote hostname for this client instance. */
 	get host(): string {
 		return this.#options.host
 	}
 
+	/** Configured remote port for this client instance. */
 	get port(): number {
 		return this.#options.port
 	}
 
-	async request(request: TFTPRequest): Promise<TFTPResponse> {
+	/**
+	 * Builds and executes an advanced GET request.
+	 *
+	 * Use this overload when you want one method that can express GET-specific
+	 * TFTP behavior without constructing a request object yourself. The effective
+	 * request options are computed from:
+	 *
+	 * 1. per-call GET options
+	 * 2. client instance defaults
+	 * 3. built-in client defaults
+	 *
+	 * The client always normalizes the path into the library's canonical TFTP
+	 * path form before sending the request. For GET, the client requests
+	 * `tsize=0` by default so the server can report the transfer size in its
+	 * OACK when supported by RFC 2349 negotiation.
+	 *
+	 * ```ts
+	 * const response = await client.request('boot/kernel.img', 'GET')
+	 * ```
+	 *
+	 * ```ts
+	 * const response = await client.request('boot/kernel.img', 'GET', {
+	 *   mode: 'netascii',
+	 *   options: { blksize: 1428, windowsize: 4 },
+	 * })
+	 * ```
+	 */
+	request(
+		path: string,
+		method: 'GET',
+		options?: ClientGetOptions,
+	): Promise<TFTPResponse>
+	/**
+	 * Builds and executes an advanced PUT request using only a body stream.
+	 *
+	 * This is the shortest advanced PUT form. The client uses the configured
+	 * instance defaults for request option negotiation and derives the transfer
+	 * size from the encoded payload.
+	 *
+	 * ```ts
+	 * const file = await Deno.open('firmware.bin', { read: true })
+	 * await client.request('uploads/firmware.bin', 'PUT', file.readable)
+	 * file.close()
+	 * ```
+	 */
+	request(
+		path: string,
+		method: 'PUT',
+		body: ReadableStream<Uint8Array>,
+	): Promise<TFTPResponse>
+	/**
+	 * Builds and executes an advanced PUT request with explicit PUT options.
+	 *
+	 * Use this overload when you need to control transfer mode, extensions, or a
+	 * declared transfer size in addition to the required body stream. Per-call
+	 * options override the client instance defaults for this request only.
+	 *
+	 * Architecturally, this method is the advanced public client API. It is
+	 * responsible for overload discrimination, path normalization, option
+	 * precedence, and construction of the effective internal {@link TFTPRequest}.
+	 * The private `#sendRequest()` method then handles the transport exchange.
+	 *
+	 * ```ts
+	 * await client.request('uploads/firmware.bin', 'PUT', {
+	 *   body: file.readable,
+	 *   mode: 'octet',
+	 *   options: { blksize: 1468, windowsize: 4 },
+	 * })
+	 * ```
+	 */
+	request(
+		path: string,
+		method: 'PUT',
+		options: ClientRequestPutOptions,
+	): Promise<TFTPResponse>
+	request(
+		path: string,
+		method: TFTPMethod,
+		options?:
+			| ClientGetOptions
+			| ClientRequestPutOptions
+			| ReadableStream<Uint8Array>,
+	): Promise<TFTPResponse> {
+		const normalizedPath = normalizeTFTPPath(path)
+		if (method === 'GET') {
+			if (options instanceof ReadableStream) {
+				throw new TypeError('GET requests do not accept a request body')
+			}
+			const getOptions = options ?? {}
+			return this.#sendRequest(
+				new TFTPRequest({
+					method,
+					path: normalizedPath,
+					mode: getOptions.mode,
+					options: {
+						blksize: this.#options.blockSize,
+						timeout: Math.max(
+							1,
+							Math.floor(this.#options.timeout / 1000),
+						),
+						windowsize: this.#options.windowSize,
+						tsize: 0,
+						...(getOptions.options ?? {}),
+					},
+					extensions: getOptions.extensions,
+				}),
+			)
+		}
+
+		const putOptions: ClientRequestPutOptions | undefined =
+			options instanceof ReadableStream
+				? { body: options }
+				: options && 'body' in options
+				? options
+				: undefined
+		if (!putOptions?.body) {
+			throw new TypeError('PUT requests require a request body')
+		}
+
+		return this.#requestPut(normalizedPath, putOptions)
+	}
+
+	async #requestPut(
+		path: string,
+		options: ClientRequestPutOptions,
+	): Promise<TFTPResponse> {
+		const bytes = await readBodyToBytes(options.body)
+		const payload = options.mode === 'netascii'
+			? encodeNetascii(bytes)
+			: bytes
+		return await this.#sendRequest(
+			new TFTPRequest({
+				method: 'PUT',
+				path,
+				mode: options.mode,
+				options: {
+					blksize: this.#options.blockSize,
+					timeout: Math.max(1, Math.floor(this.#options.timeout / 1000)),
+					windowsize: this.#options.windowSize,
+					...(options.options ?? {}),
+					...(options.size !== undefined
+						? { tsize: options.size }
+						: { tsize: payload.length }),
+				},
+				extensions: options.extensions,
+				body: streamFromBytes(payload),
+			}),
+		)
+	}
+
+	async #sendRequest(request: TFTPRequest): Promise<TFTPResponse> {
 		const socket = Deno.listenDatagram({
 			transport: 'udp',
 			hostname: '0.0.0.0',
@@ -65,7 +321,7 @@ export class Client {
 		})
 
 		try {
-			const requestPacket = encodeRequestPacket(request)
+			const requestPacket = TFTPRequest.encode(request)
 			const serverAddr = {
 				transport: 'udp' as const,
 				hostname: this.#options.host,
@@ -113,41 +369,31 @@ export class Client {
 		}
 	}
 
+	/**
+	 * Downloads a file from the configured remote endpoint.
+	 *
+	 * This is the preferred convenience API for reads. It delegates to the
+	 * advanced {@link request} overloads after applying GET-specific defaults.
+	 */
 	async get(
 		path: string,
 		options: ClientGetOptions = {},
 	): Promise<TFTPResponse> {
-		return await this.request(
-			createClientRequest('GET', path, {
-				mode: options.mode,
-				options: options.options,
-				extensions: options.extensions,
-			}, this.#options),
-		)
+		return await this.request(path, 'GET', options)
 	}
 
+	/**
+	 * Uploads a stream to the configured remote endpoint.
+	 *
+	 * This is the preferred convenience API for writes. It delegates to the
+	 * advanced PUT request overload after providing the body explicitly.
+	 */
 	async put(
 		path: string,
 		body: ReadableStream<Uint8Array>,
 		options: ClientPutOptions = {},
 	): Promise<TFTPResponse> {
-		const bytes = await readBodyToBytes(body)
-		const payload = options.mode === 'netascii'
-			? encodeNetascii(bytes)
-			: bytes
-		return await this.request(
-			createClientRequest('PUT', path, {
-				mode: options.mode,
-				options: {
-					...(options.options ?? {}),
-					...(options.size !== undefined
-						? { tsize: options.size }
-						: { tsize: payload.length }),
-				},
-				extensions: options.extensions,
-				body: streamFromBytes(payload),
-			}, this.#options),
-		)
+		return await this.request(path, 'PUT', { ...options, body })
 	}
 
 	async #handleGet(

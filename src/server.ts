@@ -1,7 +1,6 @@
 import { deadline, retry } from '@std/async'
 
 import {
-	createRequest,
 	decodeAckPacket,
 	decodeDataPacket,
 	decodeErrorPacket,
@@ -16,6 +15,7 @@ import {
 	TFTPErrorCode,
 	TFTPIllegalOperationError,
 	TFTPOpcode,
+	TFTPRequest,
 	TFTPUnknownTransferIdError,
 } from './common.ts'
 import type {
@@ -23,7 +23,7 @@ import type {
 	ServerOptions,
 	TFTPHandler,
 	TFTPOptions,
-	TFTPRequest,
+	TFTPRequestInit,
 	TFTPResponse,
 	TFTPRoute,
 	TFTPServeHandlerInfo,
@@ -146,10 +146,14 @@ export class Server {
 	}
 
 	async request(
-		request: TFTPRequest,
+		request: TFTPRequestInit,
 		remote: { address: string; port: number },
 	): Promise<TFTPResponse> {
-		return await this.#prepareResponse(request, remote, false)
+		return await this.#prepareResponse(
+			new TFTPRequest(request),
+			remote,
+			false,
+		)
 	}
 
 	async #prepareResponse(
@@ -158,7 +162,7 @@ export class Server {
 		preflightWrite: boolean,
 	): Promise<TFTPResponse> {
 		const normalizedPath = normalizeTFTPPath(request.path)
-		const normalizedRequest = { ...request, path: normalizedPath }
+		const normalizedRequest = request.with({ path: normalizedPath })
 		const info: TFTPServeHandlerInfo = {
 			remote,
 			local: { address: this.#options.host, port: this.#options.port },
@@ -284,7 +288,9 @@ export class Server {
 			port: 0,
 		}) as UdpConn
 
-		const request = createRequest(parsed.method, parsed.path, {
+		const request = new TFTPRequest({
+			method: parsed.method,
+			path: parsed.path,
 			mode: parsed.mode,
 			options: parsed.options,
 			extensions: parsed.extensions,
