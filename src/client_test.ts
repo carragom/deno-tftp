@@ -2,7 +2,7 @@ import { assertEquals, assertRejects } from '@std/assert'
 
 import { Client } from './client.ts'
 import { Server } from './server.ts'
-import { createTFTPError, TFTPErrorCode } from './common.ts'
+import { OperationTimeoutError, TFTPError, TFTPErrorCode } from './common.ts'
 import { readBodyToBytes, streamFromBytes } from './utils.ts'
 
 const UNREACHABLE_TEST_PORT = 65069
@@ -44,7 +44,9 @@ Deno.test('client put uploads bytes to built-in root', async () => {
 
 Deno.test('client request rejects TFTP errors', async () => {
 	const server = new Server(
-		() => ({ error: createTFTPError(2, 'nope') }),
+		() => ({
+			error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION, 'nope'),
+		}),
 		{
 			host: '127.0.0.1',
 			port: 0,
@@ -70,10 +72,11 @@ Deno.test({
 			retries: 1,
 		})
 		const error = await assertRejects(() => client.get('missing.txt')) as {
-			code: number
 			message: string
 		}
-		assertEquals(error.code, TFTPErrorCode.NOT_DEFINED)
+		if (!(error instanceof OperationTimeoutError)) {
+			throw error
+		}
 		assertEquals(error.message, 'Timed out')
 	},
 })

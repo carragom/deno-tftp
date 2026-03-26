@@ -1,6 +1,6 @@
 import { assertEquals } from '@std/assert'
 
-import { createRequest, createTFTPError, TFTPErrorCode } from './common.ts'
+import { createRequest, TFTPError, TFTPErrorCode } from './common.ts'
 import { route, Server } from './server.ts'
 import { readBodyToBytes, streamFromBytes } from './utils.ts'
 
@@ -42,7 +42,7 @@ Deno.test('server route handles dynamic request', async () => {
 				body: streamFromBytes(new TextEncoder().encode('dynamic')),
 			}),
 		},
-	], () => ({ error: createTFTPError(TFTPErrorCode.FILE_NOT_FOUND) }))
+	], () => ({ error: new TFTPError(TFTPErrorCode.FILE_NOT_FOUND) }))
 
 	const server = new Server(handler, { host: '127.0.0.1', port: 0 })
 	await server.listen()

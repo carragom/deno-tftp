@@ -93,7 +93,7 @@ await server.listen()
 Use routing plus a default handler:
 
 ```ts
-import { createTFTPError, route, Server } from './mod.ts'
+import { route, Server, TFTPError, TFTPErrorCode } from './mod.ts'
 
 const handler = route([
 	{
@@ -105,7 +105,9 @@ const handler = route([
 			]),
 		}),
 	},
-], async () => ({ error: createTFTPError(1, 'File not found') }))
+], async () => ({
+	error: new TFTPError(TFTPErrorCode.FILE_NOT_FOUND, 'File not found'),
+}))
 
 const server = new Server(handler, { host: '127.0.0.1', port: 1069 })
 await server.listen()

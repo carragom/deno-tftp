@@ -12,6 +12,7 @@ import {
 	encodeErrorPacket,
 	encodeOptionsAckPacket,
 	encodeRequestPacket,
+	TFTPError,
 	TFTPErrorCode,
 	TFTPMaxBlockSize,
 	TFTPMaxTimeoutSeconds,
@@ -53,10 +54,7 @@ Deno.test('ack packet round-trips', () => {
 
 Deno.test('error packet round-trips', () => {
 	const decoded = decodeErrorPacket(
-		encodeErrorPacket({
-			code: TFTPErrorCode.ACCESS_VIOLATION,
-			message: 'nope',
-		}),
+		encodeErrorPacket(new TFTPError(TFTPErrorCode.ACCESS_VIOLATION, 'nope')),
 	)
 	assertEquals(decoded.code, TFTPErrorCode.ACCESS_VIOLATION)
 	assertEquals(decoded.message, 'nope')

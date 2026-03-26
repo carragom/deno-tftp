@@ -2,7 +2,6 @@ import { deadline, retry } from '@std/async'
 
 import {
 	createRequest,
-	createTFTPError,
 	decodeAckPacket,
 	decodeDataPacket,
 	decodeErrorPacket,
@@ -12,13 +11,16 @@ import {
 	encodeErrorPacket,
 	encodeOptionsAckPacket,
 	methodMatches,
+	OperationTimeoutError,
+	TFTPError,
 	TFTPErrorCode,
+	TFTPIllegalOperationError,
 	TFTPOpcode,
+	TFTPUnknownTransferIdError,
 } from './common.ts'
 import type {
 	ParsedRequestPacket,
 	ServerOptions,
-	TFTPError,
 	TFTPHandler,
 	TFTPOptions,
 	TFTPRequest,
@@ -164,7 +166,7 @@ export class Server {
 
 		if (request.method === 'GET' && this.#options.denyGET) {
 			return {
-				error: createTFTPError(
+				error: new TFTPError(
 					TFTPErrorCode.ACCESS_VIOLATION,
 					'Cannot GET files',
 				),
@@ -172,7 +174,7 @@ export class Server {
 		}
 		if (request.method === 'PUT' && this.#options.denyPUT) {
 			return {
-				error: createTFTPError(
+				error: new TFTPError(
 					TFTPErrorCode.ACCESS_VIOLATION,
 					'Cannot PUT files',
 				),
@@ -220,7 +222,7 @@ export class Server {
 		}
 
 		return {
-			error: createTFTPError(
+			error: new TFTPError(
 				normalizedRequest.method === 'GET'
 					? TFTPErrorCode.FILE_NOT_FOUND
 					: TFTPErrorCode.ACCESS_VIOLATION,
@@ -248,7 +250,7 @@ export class Server {
 				await sendPacket(
 					socket,
 					encodeErrorPacket(
-						createTFTPError(TFTPErrorCode.ILLEGAL_OPERATION),
+						new TFTPIllegalOperationError(),
 					),
 					remote,
 				)
@@ -318,6 +320,9 @@ export class Server {
 				await sendPacket(socket, encodeErrorPacket(error), remote)
 				return
 			}
+			if (error instanceof OperationTimeoutError) {
+				return
+			}
 			throw error
 		} finally {
 			socket.close()
@@ -348,10 +353,7 @@ export class Server {
 			const ack0 = await receiveFrom(socket, remote, options.timeoutMs)
 			const ack = decodeAckPacket(ack0)
 			if (ack.block !== 0) {
-				throw createTFTPError(
-					TFTPErrorCode.ILLEGAL_OPERATION,
-					'Expected ACK block 0',
-				)
+				throw new TFTPIllegalOperationError('Expected ACK block 0')
 			}
 		}
 
@@ -419,33 +421,33 @@ export class Server {
 		declaredSize?: number,
 	): Promise<void> {
 		if (!this.#rootReal) {
-			throw createTFTPError(TFTPErrorCode.ACCESS_VIOLATION)
+			throw new TFTPError(TFTPErrorCode.ACCESS_VIOLATION)
 		}
 
 		const target = await resolvePutTarget(this.#rootReal, path)
 		const existing = await safeLstat(target.absolutePath)
 		if (existing) {
 			if (existing.isSymlink) {
-				throw createTFTPError(
+				throw new TFTPError(
 					TFTPErrorCode.ACCESS_VIOLATION,
 					'Symlinks are not allowed',
 				)
 			}
 			if (!existing.isFile) {
-				throw createTFTPError(TFTPErrorCode.ACCESS_VIOLATION)
+				throw new TFTPError(TFTPErrorCode.ACCESS_VIOLATION)
 			}
 			const realPath = await Deno.realPath(target.absolutePath)
 			assertInsideRoot(this.#rootReal, realPath)
 			if (!this.#options.allowOverwrite) {
-				throw createTFTPError(TFTPErrorCode.FILE_EXISTS)
+				throw new TFTPError(TFTPErrorCode.FILE_EXISTS)
 			}
 		} else if (!this.#options.allowCreateFile) {
-			throw createTFTPError(TFTPErrorCode.ACCESS_VIOLATION)
+			throw new TFTPError(TFTPErrorCode.ACCESS_VIOLATION)
 		}
 
 		if (target.parentPath !== target.nearestExistingParent) {
 			if (!this.#options.allowCreateDir) {
-				throw createTFTPError(TFTPErrorCode.ACCESS_VIOLATION)
+				throw new TFTPError(TFTPErrorCode.ACCESS_VIOLATION)
 			}
 			await Deno.mkdir(target.parentPath, { recursive: true })
 		}
@@ -455,13 +457,13 @@ export class Server {
 			this.#options.maxPutSize !== undefined &&
 			effectiveSize > this.#options.maxPutSize
 		) {
-			throw createTFTPError(TFTPErrorCode.DISK_FULL, 'File too big')
+			throw new TFTPError(TFTPErrorCode.DISK_FULL, 'File too big')
 		}
 		if (
 			this.#options.maxPutSize !== undefined &&
 			data.length > this.#options.maxPutSize
 		) {
-			throw createTFTPError(TFTPErrorCode.DISK_FULL, 'File too big')
+			throw new TFTPError(TFTPErrorCode.DISK_FULL, 'File too big')
 		}
 
 		await Deno.writeFile(target.absolutePath, data, { create: true })
@@ -500,29 +502,29 @@ export class Server {
 		if (existing) {
 			if (existing.isSymlink) {
 				return {
-					error: createTFTPError(
+					error: new TFTPError(
 						TFTPErrorCode.ACCESS_VIOLATION,
 						'Symlinks are not allowed',
 					),
 				}
 			}
 			if (!existing.isFile) {
-				return { error: createTFTPError(TFTPErrorCode.ACCESS_VIOLATION) }
+				return { error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION) }
 			}
 			const realPath = await Deno.realPath(target.absolutePath)
 			assertInsideRoot(this.#rootReal, realPath)
 			if (!this.#options.allowOverwrite) {
-				return { error: createTFTPError(TFTPErrorCode.FILE_EXISTS) }
+				return { error: new TFTPError(TFTPErrorCode.FILE_EXISTS) }
 			}
 		} else if (!this.#options.allowCreateFile) {
-			return { error: createTFTPError(TFTPErrorCode.ACCESS_VIOLATION) }
+			return { error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION) }
 		}
 
 		if (
 			target.parentPath !== target.nearestExistingParent &&
 			!this.#options.allowCreateDir
 		) {
-			return { error: createTFTPError(TFTPErrorCode.ACCESS_VIOLATION) }
+			return { error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION) }
 		}
 
 		const declaredSize = request.options.tsize
@@ -531,7 +533,7 @@ export class Server {
 			declaredSize > this.#options.maxPutSize
 		) {
 			return {
-				error: createTFTPError(TFTPErrorCode.DISK_FULL, 'File too big'),
+				error: new TFTPError(TFTPErrorCode.DISK_FULL, 'File too big'),
 			}
 		}
 
@@ -585,7 +587,7 @@ async function receiveFrom(
 			? await socket.receive()
 			: await receiveWithDeadline(socket.receive(), timeoutMs)
 		if (!result) {
-			throw createTFTPError(TFTPErrorCode.NOT_DEFINED, 'Timed out')
+			throw new OperationTimeoutError()
 		}
 		const [packet, addr] = result
 		const reply = addr as UdpAddr
@@ -594,7 +596,7 @@ async function receiveFrom(
 		}
 		await sendPacket(
 			socket,
-			encodeErrorPacket(createTFTPError(TFTPErrorCode.UNKNOWN_TRANSFER_ID)),
+			encodeErrorPacket(new TFTPUnknownTransferIdError()),
 			reply,
 		)
 	}
@@ -641,7 +643,7 @@ async function receiveDataWindows(
 		chunks.push(dataPacket.data)
 		totalSize += dataPacket.data.length
 		if (declaredSize !== undefined && totalSize > declaredSize) {
-			throw createTFTPError(
+			throw new TFTPError(
 				TFTPErrorCode.NOT_DEFINED,
 				'Transfer size mismatch',
 			)
@@ -660,7 +662,7 @@ async function receiveDataWindows(
 
 		if (done) {
 			if (declaredSize !== undefined && totalSize !== declaredSize) {
-				throw createTFTPError(
+				throw new TFTPError(
 					TFTPErrorCode.NOT_DEFINED,
 					'Transfer size mismatch',
 				)
@@ -695,7 +697,7 @@ async function resendFinalAckIfNeeded(
 			await sendPacket(
 				socket,
 				encodeErrorPacket(
-					createTFTPError(TFTPErrorCode.UNKNOWN_TRANSFER_ID),
+					new TFTPUnknownTransferIdError(),
 				),
 				replyAddr,
 			)
@@ -758,7 +760,7 @@ async function sendDataWindows(
 				)
 				if (ackIndex === undefined) {
 					await resendWindow()
-					throw createTFTPError(TFTPErrorCode.NOT_DEFINED, 'Timed out')
+					throw new OperationTimeoutError()
 				}
 				return ackIndex
 			}, {
@@ -797,7 +799,7 @@ async function receiveWindowAck(
 			await sendPacket(
 				socket,
 				encodeErrorPacket(
-					createTFTPError(TFTPErrorCode.UNKNOWN_TRANSFER_ID),
+					new TFTPUnknownTransferIdError(),
 				),
 				replyAddr,
 			)
@@ -907,8 +909,7 @@ function buildOackOptions(
 function isTFTPError(
 	value: unknown,
 ): value is TFTPError {
-	return typeof value === 'object' && value !== null && 'code' in value &&
-		'message' in value
+	return value instanceof TFTPError
 }
 
 function isTimeoutError(error: unknown): boolean {
@@ -916,16 +917,11 @@ function isTimeoutError(error: unknown): boolean {
 }
 
 function isTransferTimeoutError(error: unknown): boolean {
-	return isTimeoutError(error) ||
-		(typeof error === 'object' && error !== null && 'code' in error &&
-			'message' in error && (error as { code: number }).code ===
-				TFTPErrorCode.NOT_DEFINED &&
-			(error as { message: string }).message === 'Timed out')
+	return isTimeoutError(error) || error instanceof OperationTimeoutError
 }
 
 function isUnknownTransferIdError(error: unknown): boolean {
-	return typeof error === 'object' && error !== null && 'code' in error &&
-		(error as { code: number }).code === TFTPErrorCode.UNKNOWN_TRANSFER_ID
+	return error instanceof TFTPUnknownTransferIdError
 }
 
 function unwrapRetryError(error: unknown): unknown {

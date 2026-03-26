@@ -1,7 +1,6 @@
 import { deadline, retry } from '@std/async'
 
 import {
-	createTFTPError,
 	decodeAckPacket,
 	decodeDataPacket,
 	decodeErrorPacket,
@@ -10,8 +9,12 @@ import {
 	encodeDataPacket,
 	encodeErrorPacket,
 	encodeRequestPacket,
+	OperationTimeoutError,
+	TFTPError,
 	TFTPErrorCode,
+	TFTPIllegalOperationError,
 	TFTPOpcode,
+	TFTPUnknownTransferIdError,
 } from './common.ts'
 import type {
 	ClientGetOptions,
@@ -250,10 +253,7 @@ function writeNegotiatedOptions(
 	if (opcode === TFTPOpcode.ACK) {
 		const ack = decodeAckPacket(packet)
 		if (ack.block !== 0) {
-			throw createTFTPError(
-				TFTPErrorCode.ILLEGAL_OPERATION,
-				'Expected ack block 0',
-			)
+			throw new TFTPIllegalOperationError('Expected ack block 0')
 		}
 		return {
 			blksize: 512,
@@ -263,10 +263,7 @@ function writeNegotiatedOptions(
 		}
 	}
 	if (opcode !== TFTPOpcode.OACK) {
-		throw createTFTPError(
-			TFTPErrorCode.ILLEGAL_OPERATION,
-			'Expected ACK or OACK packet',
-		)
+		throw new TFTPIllegalOperationError('Expected ACK or OACK packet')
 	}
 	return readOack(request, packet)
 }
@@ -282,7 +279,7 @@ function readOack(
 	if (
 		request.options.blksize !== undefined && blksize > request.options.blksize
 	) {
-		throw createTFTPError(
+		throw new TFTPError(
 			TFTPErrorCode.REQUEST_DENIED,
 			'Invalid block size in OACK',
 		)
@@ -291,7 +288,7 @@ function readOack(
 		request.options.timeout !== undefined &&
 		timeout !== request.options.timeout
 	) {
-		throw createTFTPError(
+		throw new TFTPError(
 			TFTPErrorCode.REQUEST_DENIED,
 			'Invalid timeout in OACK',
 		)
@@ -300,7 +297,7 @@ function readOack(
 		request.options.windowsize !== undefined &&
 		windowsize > request.options.windowsize
 	) {
-		throw createTFTPError(
+		throw new TFTPError(
 			TFTPErrorCode.REQUEST_DENIED,
 			'Invalid window size in OACK',
 		)
@@ -356,38 +353,42 @@ async function receivePacket(
 	expectedRemote?: Deno.NetAddr,
 	onUnexpectedRemote?: Uint8Array,
 ): Promise<{ packet: Uint8Array; addr: UdpAddr }> {
-	return await retry(async () => {
-		const received = await receiveWithDeadline(socket.receive(), timeoutMs)
-		if (!received) {
-			await resend()
-			throw createTFTPError(TFTPErrorCode.NOT_DEFINED, 'Timed out')
-		}
-
-		const [packet, addr] = received
-		const remote = addr as UdpAddr
-		if (
-			expectedRemote &&
-			(remote.hostname !== expectedRemote.hostname ||
-				remote.port !== expectedRemote.port)
-		) {
-			if (onUnexpectedRemote) {
-				await socket.send(onUnexpectedRemote, {
-					transport: 'udp',
-					hostname: remote.hostname,
-					port: remote.port,
-				})
+	try {
+		return await retry(async () => {
+			const received = await receiveWithDeadline(socket.receive(), timeoutMs)
+			if (!received) {
+				await resend()
+				throw new OperationTimeoutError()
 			}
-			throw createTFTPError(TFTPErrorCode.UNKNOWN_TRANSFER_ID)
-		}
-		return { packet, addr: remote }
-	}, {
-		maxAttempts: retries + 1,
-		jitter: 0,
-		minTimeout: 1,
-		maxTimeout: 1,
-		isRetriable: (error: unknown) =>
-			isTimeoutError(error) || isUnknownTransferIdError(error),
-	})
+
+			const [packet, addr] = received
+			const remote = addr as UdpAddr
+			if (
+				expectedRemote &&
+				(remote.hostname !== expectedRemote.hostname ||
+					remote.port !== expectedRemote.port)
+			) {
+				if (onUnexpectedRemote) {
+					await socket.send(onUnexpectedRemote, {
+						transport: 'udp',
+						hostname: remote.hostname,
+						port: remote.port,
+					})
+				}
+				throw new TFTPUnknownTransferIdError()
+			}
+			return { packet, addr: remote }
+		}, {
+			maxAttempts: retries + 1,
+			jitter: 0,
+			minTimeout: 1,
+			maxTimeout: 1,
+			isRetriable: (error: unknown) =>
+				isOperationTimeoutError(error) || isUnknownTransferIdError(error),
+		})
+	} catch (error) {
+		throw unwrapRetryError(error)
+	}
 }
 
 async function receiveDataWindows(
@@ -416,7 +417,7 @@ async function receiveDataWindows(
 				},
 				remoteAddr,
 				encodeErrorPacket(
-					createTFTPError(TFTPErrorCode.UNKNOWN_TRANSFER_ID),
+					new TFTPUnknownTransferIdError(),
 				),
 			)).packet
 		}
@@ -497,7 +498,7 @@ async function sendDataWindows(
 			)
 			if (ackIndex === undefined) {
 				if (attempts >= retries) {
-					throw createTFTPError(TFTPErrorCode.NOT_DEFINED, 'Timed out')
+					throw new OperationTimeoutError()
 				}
 				attempts += 1
 				await sendWindow()
@@ -529,7 +530,7 @@ async function receiveWindowAck(
 		) {
 			await socket.send(
 				encodeErrorPacket(
-					createTFTPError(TFTPErrorCode.UNKNOWN_TRANSFER_ID),
+					new TFTPUnknownTransferIdError(),
 				),
 				{
 					transport: 'udp',
@@ -579,7 +580,20 @@ function isTimeoutError(error: unknown): boolean {
 	return error instanceof DOMException && error.name === 'TimeoutError'
 }
 
+function isOperationTimeoutError(error: unknown): boolean {
+	return isTimeoutError(error) || error instanceof OperationTimeoutError
+}
+
 function isUnknownTransferIdError(error: unknown): boolean {
-	return typeof error === 'object' && error !== null && 'code' in error &&
-		(error as { code: number }).code === TFTPErrorCode.UNKNOWN_TRANSFER_ID
+	return error instanceof TFTPUnknownTransferIdError
+}
+
+function unwrapRetryError(error: unknown): unknown {
+	if (error instanceof Error && 'cause' in error) {
+		const cause = (error as Error & { cause?: unknown }).cause
+		if (cause !== undefined) {
+			return cause
+		}
+	}
+	return error
 }

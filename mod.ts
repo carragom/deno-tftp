@@ -66,7 +66,7 @@
  * Use routing and stream an HTTP response body:
  *
  * ```ts
- * import { Server, route, createTFTPError } from './mod.ts'
+ * import { Server, route, TFTPError, TFTPErrorCode } from './mod.ts'
  *
  * const handler = route([
  *   {
@@ -75,12 +75,16 @@
  *     handler: async (request) => {
  *       const response = await fetch(`https://example.com/${request.path}`)
  *       if (!response.ok || !response.body) {
- *         return { error: createTFTPError(1, 'File not found') }
+ *         return {
+ *           error: new TFTPError(TFTPErrorCode.FILE_NOT_FOUND, 'File not found'),
+ *         }
  *       }
  *       return { body: response.body }
  *     },
  *   },
- * ], async () => ({ error: createTFTPError(1, 'File not found') }))
+ * ], async () => ({
+ *   error: new TFTPError(TFTPErrorCode.FILE_NOT_FOUND, 'File not found'),
+ * }))
  *
  * const server = new Server(handler, { host: '127.0.0.1', port: 1069 })
  * await server.listen()

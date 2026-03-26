@@ -9,10 +9,40 @@ export interface TFTPOptions {
 	rollover?: number
 }
 
-export interface TFTPError {
-	code: number
-	name?: string
-	message: string
+export class TFTPError extends Error {
+	readonly code: number
+
+	constructor(code: number, message?: string) {
+		super(
+			message ??
+				TFTPErrorMessage[code as keyof typeof TFTPErrorMessage] ??
+				TFTPErrorMessage[TFTPErrorCode.NOT_DEFINED],
+		)
+		this.code = code
+		this.name = TFTPErrorName[code as keyof typeof TFTPErrorName] ??
+			'TFTPError'
+		Object.setPrototypeOf(this, new.target.prototype)
+	}
+}
+
+export class OperationTimeoutError extends Error {
+	constructor(message = 'Timed out') {
+		super(message)
+		this.name = 'OperationTimeoutError'
+		Object.setPrototypeOf(this, new.target.prototype)
+	}
+}
+
+export class TFTPUnknownTransferIdError extends TFTPError {
+	constructor(message?: string) {
+		super(TFTPErrorCode.UNKNOWN_TRANSFER_ID, message)
+	}
+}
+
+export class TFTPIllegalOperationError extends TFTPError {
+	constructor(message?: string) {
+		super(TFTPErrorCode.ILLEGAL_OPERATION, message)
+	}
 }
 
 export interface TFTPRequest {
@@ -179,23 +209,6 @@ export interface ParsedOptionsAckPacket {
 	extensions: Record<string, string>
 }
 
-export function createTFTPError(
-	code: number,
-	message?: string,
-): TFTPError {
-	return {
-		code,
-		name: TFTPErrorName[code as keyof typeof TFTPErrorName],
-		message: message ??
-			TFTPErrorMessage[code as keyof typeof TFTPErrorMessage] ??
-			TFTPErrorMessage[TFTPErrorCode.NOT_DEFINED],
-	}
-}
-
-export function createNotDefinedError(message: string): TFTPError {
-	return createTFTPError(TFTPErrorCode.NOT_DEFINED, message)
-}
-
 export function createRequest(
 	method: TFTPMethod,
 	path: string,
@@ -238,7 +251,10 @@ export function encodeRequestPacket(request: TFTPRequest): Uint8Array {
 	], opcode)
 
 	if (buffer.length > TFTPRequestPacketLimit) {
-		throw createNotDefinedError('Request bigger than 512 bytes')
+		throw new TFTPError(
+			TFTPErrorCode.NOT_DEFINED,
+			'Request bigger than 512 bytes',
+		)
 	}
 
 	return buffer
@@ -246,10 +262,7 @@ export function encodeRequestPacket(request: TFTPRequest): Uint8Array {
 
 export function decodeRequestPacket(packet: Uint8Array): ParsedRequestPacket {
 	if (packet.length < 4) {
-		throw createTFTPError(
-			TFTPErrorCode.ILLEGAL_OPERATION,
-			'Malformed TFTP message',
-		)
+		throw new TFTPIllegalOperationError('Malformed TFTP message')
 	}
 
 	const view = new DataView(
@@ -259,24 +272,18 @@ export function decodeRequestPacket(packet: Uint8Array): ParsedRequestPacket {
 	)
 	const opcode = view.getUint16(0)
 	if (opcode !== TFTPOpcode.RRQ && opcode !== TFTPOpcode.WRQ) {
-		throw createTFTPError(TFTPErrorCode.ILLEGAL_OPERATION)
+		throw new TFTPIllegalOperationError()
 	}
 
 	const fields = decodeZeroTerminatedFields(packet, 2)
 	if (fields.length < 2 || fields.length % 2 !== 0) {
-		throw createTFTPError(
-			TFTPErrorCode.ILLEGAL_OPERATION,
-			'Malformed TFTP message',
-		)
+		throw new TFTPIllegalOperationError('Malformed TFTP message')
 	}
 
 	const [rawPath, rawMode, ...pairs] = fields
 	const mode = rawMode.toLowerCase() as TFTPMode
 	if (!TFTPModeValues.includes(mode)) {
-		throw createTFTPError(
-			TFTPErrorCode.ILLEGAL_OPERATION,
-			'Invalid transfer mode',
-		)
+		throw new TFTPIllegalOperationError('Invalid transfer mode')
 	}
 
 	const options: TFTPOptions = {}
@@ -285,7 +292,7 @@ export function decodeRequestPacket(packet: Uint8Array): ParsedRequestPacket {
 		const key = pairs[i].toLowerCase()
 		const value = pairs[i + 1]
 		if (key in options || key in extensions) {
-			throw createTFTPError(TFTPErrorCode.REQUEST_DENIED, 'Duplicate option')
+			throw new TFTPError(TFTPErrorCode.REQUEST_DENIED, 'Duplicate option')
 		}
 		if (TFTPKnownExtensionKeys.has(key as keyof TFTPOptions)) {
 			options[key as keyof TFTPOptions] = parseKnownOption(
@@ -326,17 +333,11 @@ export function decodeDataPacket(
 		packet.byteLength,
 	)
 	if (packet.length < 4 || view.getUint16(0) !== TFTPOpcode.DATA) {
-		throw createTFTPError(
-			TFTPErrorCode.ILLEGAL_OPERATION,
-			'Malformed TFTP message',
-		)
+		throw new TFTPIllegalOperationError('Malformed TFTP message')
 	}
 	const data = packet.slice(4)
 	if (data.length > maxBlockSize) {
-		throw createTFTPError(
-			TFTPErrorCode.ILLEGAL_OPERATION,
-			'Malformed TFTP message',
-		)
+		throw new TFTPIllegalOperationError('Malformed TFTP message')
 	}
 	return {
 		block: view.getUint16(2),
@@ -359,10 +360,7 @@ export function decodeAckPacket(packet: Uint8Array): ParsedAckPacket {
 		packet.byteLength,
 	)
 	if (packet.length !== 4 || view.getUint16(0) !== TFTPOpcode.ACK) {
-		throw createTFTPError(
-			TFTPErrorCode.ILLEGAL_OPERATION,
-			'Malformed TFTP message',
-		)
+		throw new TFTPIllegalOperationError('Malformed TFTP message')
 	}
 	return { block: view.getUint16(2) }
 }
@@ -382,17 +380,24 @@ export function decodeErrorPacket(packet: Uint8Array): TFTPError {
 		packet.byteLength,
 	)
 	if (packet.length < 4 || view.getUint16(0) !== TFTPOpcode.ERROR) {
-		throw createTFTPError(
-			TFTPErrorCode.ILLEGAL_OPERATION,
-			'Malformed TFTP message',
-		)
+		throw new TFTPIllegalOperationError('Malformed TFTP message')
 	}
 	const fields = decodeZeroTerminatedFields(packet, 4)
 	const code = view.getUint16(2)
-	return createTFTPError(
+	return instantiateTFTPError(
 		code,
 		fields[0] ?? TFTPErrorMessage[TFTPErrorCode.NOT_DEFINED],
 	)
+}
+
+function instantiateTFTPError(code: number, message?: string): TFTPError {
+	if (code === TFTPErrorCode.UNKNOWN_TRANSFER_ID) {
+		return new TFTPUnknownTransferIdError(message)
+	}
+	if (code === TFTPErrorCode.ILLEGAL_OPERATION) {
+		return new TFTPIllegalOperationError(message)
+	}
+	return new TFTPError(code, message)
 }
 
 export function encodeOptionsAckPacket(
@@ -420,18 +425,12 @@ export function decodeOptionsAckPacket(
 		packet.byteLength,
 	)
 	if (packet.length < 2 || view.getUint16(0) !== TFTPOpcode.OACK) {
-		throw createTFTPError(
-			TFTPErrorCode.ILLEGAL_OPERATION,
-			'Malformed TFTP message',
-		)
+		throw new TFTPIllegalOperationError('Malformed TFTP message')
 	}
 
 	const fields = decodeZeroTerminatedFields(packet, 2)
 	if (fields.length % 2 !== 0) {
-		throw createTFTPError(
-			TFTPErrorCode.ILLEGAL_OPERATION,
-			'Malformed TFTP message',
-		)
+		throw new TFTPIllegalOperationError('Malformed TFTP message')
 	}
 
 	const options: Partial<TFTPOptions> = {}
@@ -469,17 +468,14 @@ function parseKnownOption(
 	isReadRequest: boolean,
 ): number {
 	if (!/^\d+$/.test(rawValue)) {
-		throw createTFTPError(
-			TFTPErrorCode.REQUEST_DENIED,
-			'Invalid option value',
-		)
+		throw new TFTPError(TFTPErrorCode.REQUEST_DENIED, 'Invalid option value')
 	}
 
 	const value = Number(rawValue)
 	switch (key) {
 		case 'blksize':
 			if (value < TFTPMinBlockSize || value > TFTPMaxBlockSize) {
-				throw createTFTPError(
+				throw new TFTPError(
 					TFTPErrorCode.REQUEST_DENIED,
 					'Invalid block size',
 				)
@@ -487,15 +483,12 @@ function parseKnownOption(
 			return value
 		case 'timeout':
 			if (value < TFTPMinTimeoutSeconds || value > TFTPMaxTimeoutSeconds) {
-				throw createTFTPError(
-					TFTPErrorCode.REQUEST_DENIED,
-					'Invalid timeout',
-				)
+				throw new TFTPError(TFTPErrorCode.REQUEST_DENIED, 'Invalid timeout')
 			}
 			return value
 		case 'tsize':
 			if (value < 0 || (isReadRequest && value !== 0)) {
-				throw createTFTPError(
+				throw new TFTPError(
 					TFTPErrorCode.REQUEST_DENIED,
 					'Invalid transfer size',
 				)
@@ -503,7 +496,7 @@ function parseKnownOption(
 			return value
 		case 'windowsize':
 			if (value < TFTPMinWindowSize || value > TFTPMaxWindowSize) {
-				throw createTFTPError(
+				throw new TFTPError(
 					TFTPErrorCode.REQUEST_DENIED,
 					'Invalid window size',
 				)
@@ -511,7 +504,7 @@ function parseKnownOption(
 			return value
 		case 'rollover':
 			if (value !== 0 && value !== 1) {
-				throw createTFTPError(
+				throw new TFTPError(
 					TFTPErrorCode.REQUEST_DENIED,
 					'Invalid rollover',
 				)
@@ -555,10 +548,7 @@ function decodeZeroTerminatedFields(
 		start = index + 1
 	}
 	if (start !== packet.length) {
-		throw createTFTPError(
-			TFTPErrorCode.ILLEGAL_OPERATION,
-			'Malformed TFTP message',
-		)
+		throw new TFTPIllegalOperationError('Malformed TFTP message')
 	}
 	return fields
 }

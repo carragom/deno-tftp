@@ -10,13 +10,13 @@ import {
 
 import {
 	createRequest,
-	createTFTPError,
 	TFTPDefaultBlockSize,
 	TFTPDefaultPort,
 	TFTPDefaultRetries,
 	TFTPDefaultTimeout,
 	TFTPDefaultTransferMode,
 	TFTPDefaultWindowSize,
+	TFTPError,
 	TFTPErrorCode,
 	TFTPMaxBlockSize,
 	TFTPMaxWindowSize,
@@ -241,7 +241,7 @@ export async function resolveReadPath(
 		return { absolutePath, relativePath, exists: false }
 	}
 	if (stat.isSymlink) {
-		throw createTFTPError(
+		throw new TFTPError(
 			TFTPErrorCode.ACCESS_VIOLATION,
 			'Symlinks are not allowed',
 		)
@@ -250,7 +250,7 @@ export async function resolveReadPath(
 	assertInsideRoot(root, realPath)
 	const realStat = await Deno.lstat(realPath)
 	if (realStat.isSymlink || !realStat.isFile) {
-		throw createTFTPError(TFTPErrorCode.FILE_NOT_FOUND)
+		throw new TFTPError(TFTPErrorCode.FILE_NOT_FOUND)
 	}
 	return { absolutePath, realPath, relativePath, exists: true }
 }
@@ -264,7 +264,7 @@ export async function resolvePutTarget(
 	const existing = await maybeLstat(absolutePath)
 	if (existing) {
 		if (existing.isSymlink) {
-			throw createTFTPError(
+			throw new TFTPError(
 				TFTPErrorCode.ACCESS_VIOLATION,
 				'Symlinks are not allowed',
 			)
@@ -284,7 +284,7 @@ export async function resolvePutTarget(
 		const stat = await maybeLstat(current)
 		if (stat) {
 			if (stat.isSymlink) {
-				throw createTFTPError(
+				throw new TFTPError(
 					TFTPErrorCode.ACCESS_VIOLATION,
 					'Symlinks are not allowed',
 				)
@@ -305,7 +305,7 @@ export async function resolvePutTarget(
 		current = next
 	}
 
-	throw createTFTPError(TFTPErrorCode.ACCESS_VIOLATION)
+	throw new TFTPError(TFTPErrorCode.ACCESS_VIOLATION)
 }
 
 export function assertInsideRoot(root: string, candidate: string): void {
@@ -315,7 +315,7 @@ export function assertInsideRoot(root: string, candidate: string): void {
 		rel === '..' || rel.startsWith(`..${SEPARATOR}`) ||
 		rel.includes(`..${SEPARATOR}`)
 	) {
-		throw createTFTPError(TFTPErrorCode.ACCESS_VIOLATION)
+		throw new TFTPError(TFTPErrorCode.ACCESS_VIOLATION)
 	}
 }
 
