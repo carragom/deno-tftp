@@ -9,7 +9,6 @@ import {
 	encodeDataPacket,
 	encodeErrorPacket,
 	encodeOptionsAckPacket,
-	methodMatches,
 	OperationTimeoutError,
 	TFTPError,
 	TFTPErrorCode,
@@ -21,13 +20,10 @@ import {
 } from './common.ts'
 import type {
 	ParsedRequestPacket,
-	ServerOptions,
-	TFTPHandler,
+	TFTPMethod,
 	TFTPOptions,
 	TFTPRequestInit,
 	TFTPResponseInit,
-	TFTPRoute,
-	TFTPServeHandlerInfo,
 } from './common.ts'
 import {
 	assertInsideRoot,
@@ -53,26 +49,113 @@ interface NegotiatedTransferOptions {
 	tsize?: number
 }
 
+/** Network endpoint address and port pair for server APIs. */
+export interface TFTPEndpoint {
+	/** IP address or hostname. */
+	address: string
+	/** UDP port number. */
+	port: number
+}
+
+/** Connection metadata passed to server handlers. */
+export interface TFTPServeHandlerInfo {
+	/** Remote peer endpoint. */
+	remote: Readonly<TFTPEndpoint>
+	/** Local listening endpoint. */
+	local: Readonly<TFTPEndpoint>
+}
+
+/** Server handler function that maps a request to a TFTP response. */
+export type TFTPRequestHandler = (
+	request: TFTPRequest,
+	info: TFTPServeHandlerInfo,
+) => TFTPResponse | TFTPResponseInit | Promise<TFTPResponse | TFTPResponseInit>
+
+/** Route handler function that receives URLPattern match details. */
+export type TFTPRouteHandler = (
+	request: TFTPRequest,
+	params: URLPatternResult,
+	info: TFTPServeHandlerInfo,
+) => TFTPResponse | TFTPResponseInit | Promise<TFTPResponse | TFTPResponseInit>
+
+/** Route definition used by the built-in server router helper. */
+export interface TFTPRoute {
+	/** URLPattern matched against the request path. */
+	pattern: URLPattern
+	/** Optional method filter for this route. */
+	method?: TFTPMethod | TFTPMethod[]
+	/** Route handler invoked when the pattern and method match. */
+	handler: TFTPRouteHandler
+}
+
+/** Server configuration values. */
+export interface ServerOptions {
+	/** Bind hostname. Defaults to `127.0.0.1`. */
+	host?: string
+	/** Bind port. Defaults to `69`. */
+	port?: number
+	/** Optional filesystem root served by the built-in file handler. */
+	root?: string
+	/** Deny all GET requests before routing or default handling. */
+	denyGET?: boolean
+	/** Deny all PUT requests before routing or default handling. */
+	denyPUT?: boolean
+	/** Allow overwriting existing PUT targets. Defaults to `false`. */
+	allowOverwrite?: boolean
+	/** Allow creating missing PUT targets. Defaults to `true`. */
+	allowCreateFile?: boolean
+	/** Allow recursively creating missing PUT directories. Defaults to `false`. */
+	allowCreateDir?: boolean
+	/** Maximum accepted PUT size in octets. */
+	maxPutSize?: number
+	/** Default block size offered by the server. */
+	blockSize?: number
+	/** Default windowsize offered by the server. */
+	windowSize?: number
+	/** Default local operation timeout in milliseconds. */
+	timeout?: number
+	/** Number of retransmission attempts for timed-out operations. */
+	retries?: number
+}
+
+/**
+ * Stateful TFTP server.
+ *
+ * A server instance owns its bind options, optional built-in root-backed file
+ * handling, and any custom request handlers. The built-in dispatch order is:
+ *
+ * 1. serve an existing regular file under `root`
+ * 2. call the custom handler or router
+ * 3. call the default handler
+ * 4. return a built-in TFTP error response
+ */
 export class Server {
 	#options: NormalizedServerOptions
-	#handler?: TFTPHandler
-	#defaultHandler?: TFTPHandler
+	#handler?: TFTPRequestHandler
+	#defaultHandler?: TFTPRequestHandler
 	#rootReal?: string
 	#socket?: UdpConn
 	#loop?: Promise<void>
 	#listening = false
 	#sessions = new Set<Promise<void>>()
 
+	/**
+	 * Creates a TFTP server.
+	 *
+	 * The server is configured by `options`. You may also provide a custom
+	 * handler and an optional default handler for routed setups.
+	 */
 	constructor(
-		handler?: TFTPHandler,
 		options: ServerOptions = {},
-		defaultHandler?: TFTPHandler,
+		handler?: TFTPRequestHandler,
+		defaultHandler?: TFTPRequestHandler,
 	) {
 		this.#options = normalizeServerOptions(options)
 		this.#handler = handler
 		this.#defaultHandler = defaultHandler
 	}
 
+	/** Bound hostname. Reflects the active socket after {@link listen}. */
 	get host(): string {
 		if (this.#socket) {
 			return this.#socket.addr.hostname
@@ -80,6 +163,7 @@ export class Server {
 		return this.#options.host
 	}
 
+	/** Bound port. Reflects the active socket after {@link listen}. */
 	get port(): number {
 		if (this.#socket) {
 			return this.#socket.addr.port
@@ -87,34 +171,47 @@ export class Server {
 		return this.#options.port
 	}
 
+	/** Configured filesystem root, if any. */
 	get root(): string | undefined {
 		return this.#options.root
 	}
 
+	/** Whether GET requests are denied before routing or default handling. */
 	get denyGET(): boolean {
 		return this.#options.denyGET
 	}
 
+	/** Whether PUT requests are denied before routing or default handling. */
 	get denyPUT(): boolean {
 		return this.#options.denyPUT
 	}
 
+	/** Whether built-in PUT handling may overwrite existing files. */
 	get allowOverwrite(): boolean {
 		return this.#options.allowOverwrite
 	}
 
+	/** Whether built-in PUT handling may create missing files. */
 	get allowCreateFile(): boolean {
 		return this.#options.allowCreateFile
 	}
 
+	/** Whether built-in PUT handling may create missing directories. */
 	get allowCreateDir(): boolean {
 		return this.#options.allowCreateDir
 	}
 
+	/** Maximum accepted PUT size for built-in filesystem handling. */
 	get maxPutSize(): number | undefined {
 		return this.#options.maxPutSize
 	}
 
+	/**
+	 * Starts listening for TFTP requests.
+	 *
+	 * When `root` is configured, the root path is canonicalized before the server
+	 * begins accepting requests.
+	 */
 	async listen(): Promise<void> {
 		if (this.#listening) return
 		if (this.#options.root) {
@@ -130,6 +227,7 @@ export class Server {
 		this.#loop = this.#acceptLoop()
 	}
 
+	/** Stops the server and waits for active sessions to settle. */
 	async close(): Promise<void> {
 		if (!this.#listening) return
 		this.#listening = false
@@ -146,6 +244,11 @@ export class Server {
 		this.#socket = undefined
 	}
 
+	/**
+	 * Evaluates how this server would respond to a request from a given remote.
+	 *
+	 * This is an in-process API useful for tests and advanced composition.
+	 */
 	async request(
 		request: TFTPRequestInit,
 		remote: { address: string; port: number },
@@ -576,31 +679,35 @@ function normalizeResponse(
 		: new TFTPResponse(response)
 }
 
+function routeMatchesMethod(
+	routeMethod: TFTPMethod | TFTPMethod[] | undefined,
+	requestMethod: TFTPMethod,
+): boolean {
+	if (!routeMethod) return true
+	return Array.isArray(routeMethod)
+		? routeMethod.includes(requestMethod)
+		: routeMethod === requestMethod
+}
+
+/**
+ * Builds a routing handler from route definitions plus a default handler.
+ *
+ * Routes are tested in array order. The first route whose URL pattern matches
+ * the TFTP path and whose method filter accepts the request method is used.
+ */
 export function route(
 	routes: TFTPRoute[],
-	defaultHandler: TFTPHandler,
-): TFTPHandler {
+	defaultHandler: TFTPRequestHandler,
+): TFTPRequestHandler {
 	return (request, info) => {
 		const url = new URL(`tftp://localhost/${request.path}`)
 		for (const route of routes) {
-			const match = route.pattern.exec(url)
-			if (!match) continue
-			if (!methodMatches(route.method, request.method)) continue
-			return route.handler(
-				request,
-				info ?? {
-					remote: { address: '127.0.0.1', port: 0 },
-					local: { address: '127.0.0.1', port: 0 },
-				},
-			)
+			const params = route.pattern.exec(url)
+			if (!params) continue
+			if (!routeMatchesMethod(route.method, request.method)) continue
+			return route.handler(request, params, info)
 		}
-		return defaultHandler(
-			request,
-			info ?? {
-				remote: { address: '127.0.0.1', port: 0 },
-				local: { address: '127.0.0.1', port: 0 },
-			},
-		)
+		return defaultHandler(request, info)
 	}
 }
 

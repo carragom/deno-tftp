@@ -160,43 +160,6 @@ export class TFTPResponse {
 	}
 }
 
-export interface TFTPEndpoint {
-	address: string
-	port: number
-}
-
-export interface TFTPServeHandlerInfo {
-	remote: Readonly<TFTPEndpoint>
-	local: Readonly<TFTPEndpoint>
-}
-
-export type TFTPHandler = (
-	request: TFTPRequest,
-	info: TFTPServeHandlerInfo,
-) => TFTPResponse | TFTPResponseInit | Promise<TFTPResponse | TFTPResponseInit>
-
-export interface TFTPRoute {
-	pattern: URLPattern
-	method?: TFTPMethod | TFTPMethod[]
-	handler: TFTPHandler
-}
-
-export interface ServerOptions {
-	host?: string
-	port?: number
-	root?: string
-	denyGET?: boolean
-	denyPUT?: boolean
-	allowOverwrite?: boolean
-	allowCreateFile?: boolean
-	allowCreateDir?: boolean
-	maxPutSize?: number
-	blockSize?: number
-	windowSize?: number
-	timeout?: number
-	retries?: number
-}
-
 export const TFTPErrorCode = {
 	NOT_DEFINED: 0,
 	FILE_NOT_FOUND: 1,
@@ -469,16 +432,6 @@ export function decodeOptionsAckPacket(
 	}
 
 	return { options, extensions }
-}
-
-export function methodMatches(
-	routeMethod: TFTPMethod | TFTPMethod[] | undefined,
-	requestMethod: TFTPMethod,
-): boolean {
-	if (!routeMethod) return true
-	return Array.isArray(routeMethod)
-		? routeMethod.includes(requestMethod)
-		: routeMethod === requestMethod
 }
 
 function parseKnownOption(

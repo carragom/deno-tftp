@@ -16,7 +16,7 @@ async function main() {
 		.option('--allow-create-dir', 'Allow recursively creating directories')
 		.option('--max-put-size <bytes:number>', 'Maximum PUT size')
 		.action(async (options: Record<string, unknown>) => {
-			const server = new Server(undefined, {
+			const server = new Server({
 				host: options.host as string | undefined,
 				port: options.port as number | undefined,
 				root: options.root as string | undefined,

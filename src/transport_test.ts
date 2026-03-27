@@ -25,11 +25,11 @@ const TEST_RETRIES = 1
 
 Deno.test('client rejects server OACK that increases requested windowsize', async () => {
 	const server = new Server(
+		{ host: '127.0.0.1', port: 0 },
 		() => ({
 			options: { blksize: 512, windowsize: 8 },
 			body: streamFromBytes(new Uint8Array()),
 		}),
-		{ host: '127.0.0.1', port: 0 },
 	)
 	await server.listen()
 	try {
@@ -49,7 +49,7 @@ Deno.test('client rejects server OACK that increases requested windowsize', asyn
 Deno.test('server returns unknown transfer id error to unexpected peer', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -104,7 +104,7 @@ Deno.test('server returns unknown transfer id error to unexpected peer', async (
 })
 
 Deno.test('server ignores or errors on forged invalid opcode to listening port', async () => {
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0 })
+	const server = new Server({ host: '127.0.0.1', port: 0 })
 	await server.listen()
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
@@ -128,7 +128,7 @@ Deno.test('server ignores or errors on forged invalid opcode to listening port',
 })
 
 Deno.test('server rejects forged ACK to listening port with illegal operation', async () => {
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0 })
+	const server = new Server({ host: '127.0.0.1', port: 0 })
 	await server.listen()
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
@@ -150,7 +150,7 @@ Deno.test('server rejects forged ACK to listening port with illegal operation', 
 })
 
 Deno.test('server rejects forged DATA to listening port with illegal operation', async () => {
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0 })
+	const server = new Server({ host: '127.0.0.1', port: 0 })
 	await server.listen()
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
@@ -174,7 +174,7 @@ Deno.test('server rejects forged DATA to listening port with illegal operation',
 Deno.test('server ignores short malformed packets without crashing accept loop', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -222,7 +222,7 @@ Deno.test('server ignores short malformed packets without crashing accept loop',
 Deno.test('server OACK only includes options requested by the client', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -271,7 +271,7 @@ Deno.test('server OACK only includes options requested by the client', async () 
 Deno.test('server omits tsize from netascii RRQ OACK', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello\n')
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -314,7 +314,7 @@ Deno.test('server omits tsize from netascii RRQ OACK', async () => {
 })
 
 Deno.test('server rejects malformed RRQ missing mode terminator', async () => {
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0 })
+	const server = new Server({ host: '127.0.0.1', port: 0 })
 	await server.listen()
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
@@ -336,7 +336,7 @@ Deno.test('server rejects malformed RRQ missing mode terminator', async () => {
 })
 
 Deno.test('server rejects malformed RRQ missing transfer mode', async () => {
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0 })
+	const server = new Server({ host: '127.0.0.1', port: 0 })
 	await server.listen()
 	const socket = Deno.listenDatagram({
 		transport: 'udp',
@@ -359,7 +359,7 @@ Deno.test('server rejects malformed RRQ missing transfer mode', async () => {
 
 Deno.test('client and server can transfer windowed PUT data', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -444,7 +444,7 @@ Deno.test('client PUT advances after partial window ACK', async () => {
 
 Deno.test('client and server handle block rollover for PUT data', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -479,7 +479,7 @@ Deno.test('client and server handle block rollover for PUT data', async () => {
 Deno.test('server ignores duplicate old ACK after partial window ACK', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/partial.txt`, 'x'.repeat(39))
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -534,7 +534,7 @@ Deno.test('server ignores duplicate old ACK after partial window ACK', async () 
 Deno.test('server resends tail of GET window after partial ACK and timeout', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/rfc7440.txt`, 'x'.repeat(39))
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -584,7 +584,7 @@ Deno.test('server resends tail of GET window after partial ACK and timeout', asy
 
 Deno.test('server ACKs last good block for duplicate and out-of-order PUT data', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -647,7 +647,7 @@ Deno.test('server ACKs last good block for duplicate and out-of-order PUT data',
 
 Deno.test('server re-ACKs last committed PUT block after hole in window', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -713,7 +713,7 @@ Deno.test('server re-ACKs last committed PUT block after hole in window', async 
 
 Deno.test('server resends final ACK when last WRQ data block is retransmitted', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -759,7 +759,7 @@ Deno.test('server resends final ACK when last WRQ data block is retransmitted', 
 
 Deno.test('server rejects PUT body larger than declared tsize', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,

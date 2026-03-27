@@ -186,27 +186,6 @@ export class Client {
 	 * promise resolves to a {@link TFTPResponse} with `ok === false` and a
 	 * populated `error` field. Local timeout, runtime, and protocol validation
 	 * failures still throw.
-	 *
-	 * ```ts
-	 * const response = await client.request('boot/kernel.img', 'GET')
-	 * if (!response.ok) {
-	 *   console.error(response.error?.code, response.error?.message)
-	 *   return
-	 * }
-	 *
-	 * await response.body?.pipeTo(Deno.stdout.writable)
-	 * ```
-	 *
-	 * ```ts
-	 * const response = await client.request('boot/kernel.img', 'GET', {
-	 *   mode: 'netascii',
-	 *   options: { blksize: 1428, windowsize: 4 },
-	 * })
-	 *
-	 * if (!response.ok) {
-	 *   console.error(response.error?.message)
-	 * }
-	 * ```
 	 */
 	request(
 		path: string,
@@ -222,20 +201,6 @@ export class Client {
 	 *
 	 * Remote TFTP ERROR packets resolve as `TFTPResponse` objects with
 	 * `ok === false`.
-	 *
-	 * ```ts
-	 * const file = await Deno.open('firmware.bin', { read: true })
-	 * const response = await client.request(
-	 *   'uploads/firmware.bin',
-	 *   'PUT',
-	 *   file.readable,
-	 * )
-	 * file.close()
-	 *
-	 * if (!response.ok) {
-	 *   console.error(response.error?.message)
-	 * }
-	 * ```
 	 */
 	request(
 		path: string,
@@ -255,18 +220,6 @@ export class Client {
 	 * The private `#sendRequest()` method then handles the transport exchange.
 	 * Remote TFTP ERROR packets resolve as `TFTPResponse` objects with
 	 * `ok === false`.
-	 *
-	 * ```ts
-	 * const response = await client.request('uploads/firmware.bin', 'PUT', {
-	 *   body: file.readable,
-	 *   mode: 'octet',
-	 *   options: { blksize: 1468, windowsize: 4 },
-	 * })
-	 *
-	 * if (!response.ok) {
-	 *   console.error(response.error?.code, response.error?.message)
-	 * }
-	 * ```
 	 */
 	request(
 		path: string,

@@ -1,7 +1,6 @@
 import { assertEquals } from '@std/assert'
 
-import { Client } from './client.ts'
-import { Server } from './server.ts'
+import { Client, Server } from '../mod.ts'
 import {
 	parseInteropServers,
 	readBodyToBytes,
@@ -24,7 +23,7 @@ Deno.test('client and server interoperate in-process', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
 
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -60,7 +59,7 @@ Deno.test('client and server negotiate windowsize and blocksize in-process', asy
 	const payload = 'x'.repeat(3000)
 	await Deno.writeTextFile(`${root}/big.txt`, payload)
 
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -96,7 +95,7 @@ Deno.test('client and server handle concurrent RRQ in-process', async () => {
 	const payload = 'x'.repeat(4096)
 	await Deno.writeTextFile(`${root}/shared.txt`, payload)
 
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -123,7 +122,7 @@ Deno.test('client and server handle concurrent RRQ in-process', async () => {
 
 Deno.test('client and server handle concurrent WRQ in-process', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -158,7 +157,7 @@ Deno.test('client and server translate netascii on GET in-process', async () => 
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/unix.txt`, 'foo\nbar\rbaz\n')
 
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -186,7 +185,7 @@ Deno.test('client and server translate netascii on GET in-process', async () => 
 
 Deno.test('client and server translate netascii on PUT in-process', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -480,7 +479,7 @@ async function withInteropServer(
 	run: (server: Server, root: string) => Promise<void>,
 ): Promise<void> {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,

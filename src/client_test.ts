@@ -14,7 +14,7 @@ Deno.test('client get reads file served by local server', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
 
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -41,7 +41,7 @@ Deno.test('client get reads file served by local server', async () => {
 
 Deno.test('client put uploads bytes to built-in root', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -68,15 +68,15 @@ Deno.test('client put uploads bytes to built-in root', async () => {
 
 Deno.test('client request resolves remote TFTP errors', async () => {
 	const server = new Server(
-		() => ({
-			error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION, 'nope'),
-		}),
 		{
 			host: '127.0.0.1',
 			port: 0,
 			timeout: TEST_TIMEOUT_MS,
 			retries: TEST_RETRIES,
 		},
+		() => ({
+			error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION, 'nope'),
+		}),
 	)
 	await server.listen()
 	try {
@@ -99,7 +99,7 @@ Deno.test('client request GET overload downloads a file', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'hello')
 
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -127,7 +127,7 @@ Deno.test('client request GET overload downloads a file', async () => {
 
 Deno.test('client request PUT overload uploads a body stream', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -160,16 +160,16 @@ Deno.test('client request options override instance defaults', async () => {
 	const requests: Array<{
 		options: Readonly<Record<string, unknown>>
 	}> = []
-	const server = new Server((request) => {
-		requests.push({
-			options: request.options as Readonly<Record<string, unknown>>,
-		})
-		return { body: streamFromBytes(new TextEncoder().encode('hello')) }
-	}, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		timeout: TEST_TIMEOUT_MS,
 		retries: TEST_RETRIES,
+	}, (request) => {
+		requests.push({
+			options: request.options as Readonly<Record<string, unknown>>,
+		})
+		return { body: streamFromBytes(new TextEncoder().encode('hello')) }
 	})
 	await server.listen()
 	try {
@@ -196,16 +196,16 @@ Deno.test('client request falls back to instance defaults', async () => {
 	const requests: Array<{
 		options: Readonly<Record<string, unknown>>
 	}> = []
-	const server = new Server((request) => {
-		requests.push({
-			options: request.options as Readonly<Record<string, unknown>>,
-		})
-		return { body: streamFromBytes(new TextEncoder().encode('hello')) }
-	}, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		timeout: TEST_TIMEOUT_MS,
 		retries: TEST_RETRIES,
+	}, (request) => {
+		requests.push({
+			options: request.options as Readonly<Record<string, unknown>>,
+		})
+		return { body: streamFromBytes(new TextEncoder().encode('hello')) }
 	})
 	await server.listen()
 	try {

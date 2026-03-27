@@ -9,14 +9,14 @@ Deno.test('server serves existing regular file before custom handler', async () 
 	await Deno.writeTextFile(`${root}/hello.txt`, 'root')
 
 	const server = new Server(
-		() => ({
-			body: streamFromBytes(new TextEncoder().encode('handler')),
-		}),
 		{
 			host: '127.0.0.1',
 			port: 0,
 			root,
 		},
+		() => ({
+			body: streamFromBytes(new TextEncoder().encode('handler')),
+		}),
 	)
 	await server.listen()
 	try {
@@ -41,13 +41,17 @@ Deno.test('server route handles dynamic request', async () => {
 		{
 			method: 'GET',
 			pattern: new URLPattern({ pathname: '/hello/:name' }),
-			handler: (_request, _info) => ({
-				body: streamFromBytes(new TextEncoder().encode('dynamic')),
+			handler: (_request, params, info) => ({
+				body: streamFromBytes(
+					new TextEncoder().encode(
+						`${params.pathname.groups.name}:${info.remote.address}`,
+					),
+				),
 			}),
 		},
 	], () => ({ error: new TFTPError(TFTPErrorCode.FILE_NOT_FOUND) }))
 
-	const server = new Server(handler, { host: '127.0.0.1', port: 0 })
+	const server = new Server({ host: '127.0.0.1', port: 0 }, handler)
 	await server.listen()
 	try {
 		const response = await server.request(
@@ -59,7 +63,44 @@ Deno.test('server route handles dynamic request', async () => {
 		)
 		assertEquals(
 			new TextDecoder().decode(await readBodyToBytes(response.body)),
-			'dynamic',
+			'world:127.0.0.1',
+		)
+	} finally {
+		await server.close()
+	}
+})
+
+Deno.test('server route falls back to default handler when unmatched', async () => {
+	const handler = route(
+		[
+			{
+				method: 'GET',
+				pattern: new URLPattern({ pathname: '/hello/:name' }),
+				handler: () => ({
+					body: streamFromBytes(new TextEncoder().encode('matched')),
+				}),
+			},
+		],
+		(_request, info) => ({
+			body: streamFromBytes(
+				new TextEncoder().encode(`default:${info.remote.address}`),
+			),
+		}),
+	)
+
+	const server = new Server({ host: '127.0.0.1', port: 0 }, handler)
+	await server.listen()
+	try {
+		const response = await server.request(
+			{ method: 'GET', path: 'goodbye/world' },
+			{
+				address: '127.0.0.1',
+				port: 9999,
+			},
+		)
+		assertEquals(
+			new TextDecoder().decode(await readBodyToBytes(response.body)),
+			'default:127.0.0.1',
 		)
 	} finally {
 		await server.close()
@@ -70,7 +111,7 @@ Deno.test('server request accepts request init objects', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'root')
 
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
+	const server = new Server({ host: '127.0.0.1', port: 0, root })
 	await server.listen()
 	try {
 		const response = await server.request(
@@ -90,7 +131,7 @@ Deno.test('server request accepts request instances', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/hello.txt`, 'root')
 
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
+	const server = new Server({ host: '127.0.0.1', port: 0, root })
 	await server.listen()
 	try {
 		const response = await server.request(
@@ -109,7 +150,7 @@ Deno.test('server request accepts request instances', async () => {
 Deno.test('server rejects overwrite by default', async () => {
 	const root = await Deno.makeTempDir()
 	await Deno.writeTextFile(`${root}/file.txt`, 'old')
-	const server = new Server(undefined, { host: '127.0.0.1', port: 0, root })
+	const server = new Server({ host: '127.0.0.1', port: 0, root })
 	await server.listen()
 	try {
 		const response = await server.request(
@@ -128,7 +169,7 @@ Deno.test('server rejects overwrite by default', async () => {
 
 Deno.test('server creates directories recursively when enabled', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
@@ -156,7 +197,7 @@ Deno.test('server creates directories recursively when enabled', async () => {
 
 Deno.test('server enforces maxPutSize', async () => {
 	const root = await Deno.makeTempDir()
-	const server = new Server(undefined, {
+	const server = new Server({
 		host: '127.0.0.1',
 		port: 0,
 		root,
