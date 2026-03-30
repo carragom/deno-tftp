@@ -1054,7 +1054,7 @@ async function maybeReceiveDatagram(
 }
 
 async function streamToBytes(
-	body?: ReadableStream<Uint8Array>,
+	body?: ReadableStream<Uint8Array> | null,
 ): Promise<Uint8Array> {
 	if (!body) return new Uint8Array()
 	const reader = body.getReader()

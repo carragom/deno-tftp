@@ -126,7 +126,7 @@ export class TFTPRequest {
 }
 
 export interface TFTPResponseInit {
-	body?: ReadableStream<Uint8Array>
+	body?: ReadableStream<Uint8Array> | null
 	options?: Partial<TFTPOptions>
 	extensions?: Record<string, string>
 	error?: TFTPError
@@ -138,7 +138,7 @@ export interface TFTPResponseInit {
  * A response is successful when it does not carry a remote TFTP ERROR result.
  */
 export class TFTPResponse {
-	readonly body?: ReadableStream<Uint8Array>
+	readonly body?: ReadableStream<Uint8Array> | null
 	readonly options?: Readonly<Partial<TFTPOptions>>
 	readonly extensions?: Readonly<Record<string, string>>
 	readonly error?: TFTPError

@@ -332,7 +332,7 @@ export function streamFromBytes(data: Uint8Array): ReadableStream<Uint8Array> {
 }
 
 export async function readBodyToBytes(
-	body?: ReadableStream<Uint8Array>,
+	body?: ReadableStream<Uint8Array> | null,
 ): Promise<Uint8Array> {
 	if (!body) return new Uint8Array()
 	return await readStreamFully(body)
