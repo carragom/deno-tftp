@@ -118,6 +118,9 @@
  *   host: '0.0.0.0',
  *   port: 1069,
  *   root: './tftproot',
+ *   logger(entry) {
+ *     console.log(entry.event, entry.source, entry.method, entry.path)
+ *   },
  * })
  *
  * await server.listen()
@@ -205,6 +208,10 @@ export type {
 } from './src/common.ts'
 export { route, Server } from './src/server.ts'
 export type {
+	ServerLogEntry,
+	ServerLogger,
+	ServerLogLevel,
+	ServerLogSource,
 	ServerOptions,
 	TFTPEndpoint,
 	TFTPRequestHandler,

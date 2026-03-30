@@ -158,6 +158,9 @@ const server = new Server({
 	host: '0.0.0.0',
 	port: 69,
 	root: './tftproot',
+	logger(entry) {
+		console.log(entry.event, entry.source, entry.method, entry.path)
+	},
 })
 
 await server.listen()
@@ -249,8 +252,39 @@ deno run -A src/tftp.ts put tftp://127.0.0.1:1069/file.dat local.dat
 Start the server:
 
 ```sh
-deno run -A src/tftpd.ts --host 0.0.0.0 --port 1069 --root .
+deno run -A src/tftpd.ts --host 0.0.0.0 --port 1069 --root . --log-level warn
 ```
+
+A sample `systemd` unit is available at `examples/tftpd.service`.
+
+### Run with systemd
+
+Adjust `examples/tftpd.service` for your install path, Deno binary, service
+user, and TFTP root, then install and enable it:
+
+Create the service account and TFTP root first:
+
+```sh
+sudo useradd --system --home-dir /srv/tftp --shell /usr/sbin/nologin tftp
+sudo install -d -o tftp -g tftp -m 0755 /srv/tftp
+```
+
+```sh
+sudo install -D -m 0644 examples/tftpd.service /etc/systemd/system/tftpd.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now tftpd.service
+```
+
+The sample unit defaults to `--log-level warn`, which works well with `journald`
+for a long-running service.
+
+The sample unit also grants `CAP_NET_BIND_SERVICE`, which allows the `tftp`
+service user to bind privileged ports such as UDP `69` without running the whole
+server as `root`. If you do not need the standard port, change the unit to use
+an unprivileged port such as `1069` and remove the capability settings.
+
+The sample unit also enables a conservative sandbox and limits writable paths to
+`/srv/tftp`. Adjust `ReadWritePaths=` if you use a different TFTP root.
 
 ## Tests
 

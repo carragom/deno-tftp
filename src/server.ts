@@ -49,6 +49,8 @@ interface NegotiatedTransferOptions {
 	tsize?: number
 }
 
+const responseLogSources = new WeakMap<TFTPResponse, ServerLogSource>()
+
 /** Network endpoint address and port pair for server APIs. */
 export interface TFTPEndpoint {
 	/** IP address or hostname. */
@@ -88,6 +90,30 @@ export interface TFTPRoute {
 	handler: TFTPRouteHandler
 }
 
+export type ServerLogLevel = 'info' | 'warn' | 'error'
+
+export type ServerLogSource =
+	| 'server'
+	| 'root'
+	| 'handler'
+	| 'builtin_error'
+	| 'protocol'
+
+export interface ServerLogEntry {
+	level: ServerLogLevel
+	event: string
+	source: ServerLogSource
+	method?: TFTPMethod
+	path?: string
+	remote?: Readonly<TFTPEndpoint>
+	local?: Readonly<TFTPEndpoint>
+	bytes?: number
+	message?: string
+	error?: TFTPError
+}
+
+export type ServerLogger = (entry: Readonly<ServerLogEntry>) => void
+
 /** Server configuration values. */
 export interface ServerOptions {
 	/** Bind hostname. Defaults to `127.0.0.1`. */
@@ -116,6 +142,8 @@ export interface ServerOptions {
 	timeout?: number
 	/** Number of retransmission attempts for timed-out operations. */
 	retries?: number
+	/** Optional structured logger for server lifecycle and request events. */
+	logger?: ServerLogger
 }
 
 /**
@@ -132,6 +160,7 @@ export interface ServerOptions {
 export class Server {
 	#options: NormalizedServerOptions
 	#handler?: TFTPRequestHandler
+	#logger?: ServerLogger
 	#rootReal?: string
 	#socket?: UdpConn
 	#loop?: Promise<void>
@@ -150,6 +179,7 @@ export class Server {
 	) {
 		this.#options = normalizeServerOptions(options)
 		this.#handler = handler
+		this.#logger = options.logger
 	}
 
 	/** Bound hostname. Reflects the active socket after {@link listen}. */
@@ -221,6 +251,12 @@ export class Server {
 			port: this.#options.port,
 		}) as UdpConn
 		this.#listening = true
+		this.#log({
+			level: 'info',
+			event: 'server.listen',
+			source: 'server',
+			local: this.#localEndpoint(),
+		})
 		this.#loop = this.#acceptLoop()
 	}
 
@@ -228,6 +264,12 @@ export class Server {
 	async close(): Promise<void> {
 		if (!this.#listening) return
 		this.#listening = false
+		this.#log({
+			level: 'info',
+			event: 'server.close',
+			source: 'server',
+			local: this.#localEndpoint(),
+		})
 		this.#socket?.close()
 		if (this.#loop) {
 			try {
@@ -250,11 +292,43 @@ export class Server {
 		request: TFTPRequestInit,
 		remote: { address: string; port: number },
 	): Promise<TFTPResponse> {
-		return await this.#prepareResponse(
-			new TFTPRequest(request),
+		const normalizedRequest = new TFTPRequest(request)
+		this.#logRequest(
+			'info',
+			'request.start',
+			'server',
+			normalizedRequest,
+			remote,
+		)
+		const response = await this.#prepareResponse(
+			normalizedRequest,
 			remote,
 			false,
 		)
+		if (response.error) {
+			this.#logRequest(
+				'warn',
+				'request.rejected',
+				responseLogSource(response),
+				normalizedRequest,
+				remote,
+				{
+					error: response.error,
+				},
+			)
+			return response
+		}
+		this.#logRequest(
+			'info',
+			'request.complete',
+			responseLogSource(response),
+			normalizedRequest,
+			remote,
+			{
+				bytes: response.options?.tsize,
+			},
+		)
+		return response
 	}
 
 	async #prepareResponse(
@@ -270,20 +344,40 @@ export class Server {
 		}
 
 		if (request.method === 'GET' && this.#options.denyGET) {
-			return new TFTPResponse({
+			this.#logRequest(
+				'warn',
+				'request.denied',
+				'server',
+				normalizedRequest,
+				remote,
+				{
+					message: 'Cannot GET files',
+				},
+			)
+			return newTFTPResponse({
 				error: new TFTPError(
 					TFTPErrorCode.ACCESS_VIOLATION,
 					'Cannot GET files',
 				),
-			})
+			}, 'server')
 		}
 		if (request.method === 'PUT' && this.#options.denyPUT) {
-			return new TFTPResponse({
+			this.#logRequest(
+				'warn',
+				'request.denied',
+				'server',
+				normalizedRequest,
+				remote,
+				{
+					message: 'Cannot PUT files',
+				},
+			)
+			return newTFTPResponse({
 				error: new TFTPError(
 					TFTPErrorCode.ACCESS_VIOLATION,
 					'Cannot PUT files',
 				),
-			})
+			}, 'server')
 		}
 
 		if (this.#rootReal) {
@@ -291,6 +385,16 @@ export class Server {
 				? await this.#serveFromRoot(normalizedPath)
 				: await this.#prepareWriteToRoot(normalizedPath, normalizedRequest)
 			if (fileResponse) {
+				this.#logRequest(
+					fileResponse.error ? 'warn' : 'info',
+					'request.dispatch',
+					'root',
+					normalizedRequest,
+					remote,
+					{
+						error: fileResponse.error,
+					},
+				)
 				if (
 					!preflightWrite && normalizedRequest.method === 'PUT' &&
 					!fileResponse.error &&
@@ -317,17 +421,34 @@ export class Server {
 				response.error || response.body || response.options ||
 				response.extensions
 			) {
+				this.#logRequest(
+					response.error ? 'warn' : 'info',
+					'request.dispatch',
+					'handler',
+					normalizedRequest,
+					remote,
+					{
+						error: response.error,
+					},
+				)
 				return response
 			}
 		}
 
-		return new TFTPResponse({
+		this.#logRequest(
+			warnLevelForBuiltInError(normalizedRequest.method),
+			'request.dispatch',
+			'builtin_error',
+			normalizedRequest,
+			remote,
+		)
+		return newTFTPResponse({
 			error: new TFTPError(
 				normalizedRequest.method === 'GET'
 					? TFTPErrorCode.FILE_NOT_FOUND
 					: TFTPErrorCode.ACCESS_VIOLATION,
 			),
-		})
+		}, 'builtin_error')
 	}
 
 	async #acceptLoop(): Promise<void> {
@@ -345,8 +466,17 @@ export class Server {
 
 			const [packet, addr] = received
 			const remote = addr as UdpAddr
+			const remoteInfo = { address: remote.hostname, port: remote.port }
 			const opcode = packet.length >= 2 ? readOpcode(packet) : -1
 			if (opcode !== TFTPOpcode.RRQ && opcode !== TFTPOpcode.WRQ) {
+				this.#log({
+					level: 'warn',
+					event: 'request.invalid',
+					source: 'protocol',
+					remote: remoteInfo,
+					local: this.#localEndpoint(),
+					message: 'Invalid request opcode',
+				})
 				await sendPacket(
 					socket,
 					encodeErrorPacket(
@@ -362,6 +492,14 @@ export class Server {
 				parsed = decodeRequestPacket(packet)
 			} catch (error) {
 				if (isTFTPError(error)) {
+					this.#log({
+						level: 'warn',
+						event: 'request.decode_error',
+						source: 'protocol',
+						remote: remoteInfo,
+						local: this.#localEndpoint(),
+						error,
+					})
 					await sendPacket(socket, encodeErrorPacket(error), remote)
 					continue
 				}
@@ -391,6 +529,11 @@ export class Server {
 			options: parsed.options,
 			extensions: parsed.extensions,
 		})
+		const remoteInfo = {
+			address: remote.hostname,
+			port: remote.port,
+		}
+		this.#logRequest('info', 'request.start', 'server', request, remoteInfo)
 		const response = await this.#prepareResponse(request, {
 			address: remote.hostname,
 			port: remote.port,
@@ -398,6 +541,16 @@ export class Server {
 
 		try {
 			if (response.error) {
+				this.#logRequest(
+					'warn',
+					'request.rejected',
+					responseLogSource(response),
+					request,
+					remoteInfo,
+					{
+						error: response.error,
+					},
+				)
 				await sendPacket(socket, encodeErrorPacket(response.error), remote)
 				return
 			}
@@ -417,12 +570,39 @@ export class Server {
 					response,
 				)
 			}
+			this.#logRequest(
+				'info',
+				'request.complete',
+				responseLogSource(response),
+				request,
+				remoteInfo,
+				{
+					bytes: response.options?.tsize ?? request.options.tsize,
+				},
+			)
 		} catch (error) {
 			if (isTFTPError(error)) {
+				this.#logRequest(
+					'error',
+					'request.failed',
+					'protocol',
+					request,
+					remoteInfo,
+					{
+						error,
+					},
+				)
 				await sendPacket(socket, encodeErrorPacket(error), remote)
 				return
 			}
 			if (error instanceof OperationTimeoutError) {
+				this.#logRequest(
+					'warn',
+					'request.timeout',
+					'protocol',
+					request,
+					remoteInfo,
+				)
 				return
 			}
 			throw error
@@ -541,14 +721,41 @@ export class Server {
 			const realPath = await Deno.realPath(target.absolutePath)
 			assertInsideRoot(this.#rootReal, realPath)
 			if (!this.#options.allowOverwrite) {
+				this.#log({
+					level: 'warn',
+					event: 'request.denied',
+					source: 'root',
+					method: 'PUT',
+					path,
+					local: this.#localEndpoint(),
+					message: 'Refusing to overwrite existing file',
+				})
 				throw new TFTPError(TFTPErrorCode.FILE_EXISTS)
 			}
 		} else if (!this.#options.allowCreateFile) {
+			this.#log({
+				level: 'warn',
+				event: 'request.denied',
+				source: 'root',
+				method: 'PUT',
+				path,
+				local: this.#localEndpoint(),
+				message: 'Refusing to create missing file',
+			})
 			throw new TFTPError(TFTPErrorCode.ACCESS_VIOLATION)
 		}
 
 		if (target.parentPath !== target.nearestExistingParent) {
 			if (!this.#options.allowCreateDir) {
+				this.#log({
+					level: 'warn',
+					event: 'request.denied',
+					source: 'root',
+					method: 'PUT',
+					path,
+					local: this.#localEndpoint(),
+					message: 'Refusing to create missing parent directories',
+				})
 				throw new TFTPError(TFTPErrorCode.ACCESS_VIOLATION)
 			}
 			await Deno.mkdir(target.parentPath, { recursive: true })
@@ -559,16 +766,45 @@ export class Server {
 			this.#options.maxPutSize !== undefined &&
 			effectiveSize > this.#options.maxPutSize
 		) {
+			this.#log({
+				level: 'warn',
+				event: 'request.denied',
+				source: 'root',
+				method: 'PUT',
+				path,
+				local: this.#localEndpoint(),
+				bytes: effectiveSize,
+				message: 'PUT target exceeds configured maxPutSize',
+			})
 			throw new TFTPError(TFTPErrorCode.DISK_FULL, 'File too big')
 		}
 		if (
 			this.#options.maxPutSize !== undefined &&
 			data.length > this.#options.maxPutSize
 		) {
+			this.#log({
+				level: 'warn',
+				event: 'request.denied',
+				source: 'root',
+				method: 'PUT',
+				path,
+				local: this.#localEndpoint(),
+				bytes: data.length,
+				message: 'Received PUT payload exceeds configured maxPutSize',
+			})
 			throw new TFTPError(TFTPErrorCode.DISK_FULL, 'File too big')
 		}
 
 		await Deno.writeFile(target.absolutePath, data, { create: true })
+		this.#log({
+			level: 'info',
+			event: 'request.persisted',
+			source: 'root',
+			method: 'PUT',
+			path,
+			local: this.#localEndpoint(),
+			bytes: data.length,
+		})
 	}
 
 	async #serveFromRoot(path: string): Promise<TFTPResponse | undefined> {
@@ -578,16 +814,16 @@ export class Server {
 				return undefined
 			}
 			const bytes = await Deno.readFile(resolved.realPath)
-			return new TFTPResponse({
+			return newTFTPResponse({
 				body: streamFromBytes(bytes),
 				options: { tsize: bytes.length },
-			})
+			}, 'root')
 		} catch (error) {
 			if (isTFTPError(error)) {
 				if (error.code === TFTPErrorCode.FILE_NOT_FOUND) {
 					return undefined
 				}
-				return new TFTPResponse({ error })
+				return newTFTPResponse({ error }, 'root')
 			}
 			throw error
 		}
@@ -603,38 +839,74 @@ export class Server {
 		const existing = await safeLstat(target.absolutePath)
 		if (existing) {
 			if (existing.isSymlink) {
-				return new TFTPResponse({
+				this.#log({
+					level: 'warn',
+					event: 'request.denied',
+					source: 'root',
+					method: 'PUT',
+					path,
+					local: this.#localEndpoint(),
+					message: 'Symlinks are not allowed',
+				})
+				return newTFTPResponse({
 					error: new TFTPError(
 						TFTPErrorCode.ACCESS_VIOLATION,
 						'Symlinks are not allowed',
 					),
-				})
+				}, 'root')
 			}
 			if (!existing.isFile) {
-				return new TFTPResponse({
+				return newTFTPResponse({
 					error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION),
-				})
+				}, 'root')
 			}
 			const realPath = await Deno.realPath(target.absolutePath)
 			assertInsideRoot(this.#rootReal, realPath)
 			if (!this.#options.allowOverwrite) {
-				return new TFTPResponse({
-					error: new TFTPError(TFTPErrorCode.FILE_EXISTS),
+				this.#log({
+					level: 'warn',
+					event: 'request.denied',
+					source: 'root',
+					method: 'PUT',
+					path,
+					local: this.#localEndpoint(),
+					message: 'Refusing to overwrite existing file',
 				})
+				return newTFTPResponse({
+					error: new TFTPError(TFTPErrorCode.FILE_EXISTS),
+				}, 'root')
 			}
 		} else if (!this.#options.allowCreateFile) {
-			return new TFTPResponse({
-				error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION),
+			this.#log({
+				level: 'warn',
+				event: 'request.denied',
+				source: 'root',
+				method: 'PUT',
+				path,
+				local: this.#localEndpoint(),
+				message: 'Refusing to create missing file',
 			})
+			return newTFTPResponse({
+				error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION),
+			}, 'root')
 		}
 
 		if (
 			target.parentPath !== target.nearestExistingParent &&
 			!this.#options.allowCreateDir
 		) {
-			return new TFTPResponse({
-				error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION),
+			this.#log({
+				level: 'warn',
+				event: 'request.denied',
+				source: 'root',
+				method: 'PUT',
+				path,
+				local: this.#localEndpoint(),
+				message: 'Refusing to create missing parent directories',
 			})
+			return newTFTPResponse({
+				error: new TFTPError(TFTPErrorCode.ACCESS_VIOLATION),
+			}, 'root')
 		}
 
 		const declaredSize = request.options.tsize
@@ -642,12 +914,22 @@ export class Server {
 			declaredSize !== undefined && this.#options.maxPutSize !== undefined &&
 			declaredSize > this.#options.maxPutSize
 		) {
-			return new TFTPResponse({
-				error: new TFTPError(TFTPErrorCode.DISK_FULL, 'File too big'),
+			this.#log({
+				level: 'warn',
+				event: 'request.denied',
+				source: 'root',
+				method: 'PUT',
+				path,
+				local: this.#localEndpoint(),
+				bytes: declaredSize,
+				message: 'PUT target exceeds configured maxPutSize',
 			})
+			return newTFTPResponse({
+				error: new TFTPError(TFTPErrorCode.DISK_FULL, 'File too big'),
+			}, 'root')
 		}
 
-		return new TFTPResponse({
+		return newTFTPResponse({
 			options: {
 				blksize: request.options.blksize ?? 512,
 				timeout: request.options.timeout ??
@@ -655,6 +937,53 @@ export class Server {
 				windowsize: request.options.windowsize ?? 1,
 				...(declaredSize !== undefined ? { tsize: declaredSize } : {}),
 			},
+		}, 'root')
+	}
+
+	#localEndpoint(): TFTPEndpoint {
+		return {
+			address: this.host,
+			port: this.port,
+		}
+	}
+
+	#log(entry: ServerLogEntry): void {
+		if (!this.#logger) return
+		try {
+			this.#logger(Object.freeze({ ...entry }))
+		} catch {
+			// Logging must never affect request handling.
+		}
+	}
+
+	#logRequest(
+		level: ServerLogLevel,
+		event: string,
+		source: ServerLogSource,
+		request: TFTPRequest,
+		remote: { address: string; port: number },
+		extra: Partial<
+			Omit<
+				ServerLogEntry,
+				| 'level'
+				| 'event'
+				| 'source'
+				| 'method'
+				| 'path'
+				| 'remote'
+				| 'local'
+			>
+		> = {},
+	): void {
+		this.#log({
+			level,
+			event,
+			source,
+			method: request.method,
+			path: request.path,
+			remote,
+			local: this.#localEndpoint(),
+			...extra,
 		})
 	}
 }
@@ -665,6 +994,24 @@ function normalizeResponse(
 	return response instanceof TFTPResponse
 		? response
 		: new TFTPResponse(response)
+}
+
+function responseLogSource(response: TFTPResponse): ServerLogSource {
+	return responseLogSources.get(response) ??
+		(response.error ? 'builtin_error' : 'handler')
+}
+
+function warnLevelForBuiltInError(method: TFTPMethod): ServerLogLevel {
+	return method === 'GET' ? 'info' : 'warn'
+}
+
+function newTFTPResponse(
+	init: TFTPResponseInit,
+	source: ServerLogSource,
+): TFTPResponse {
+	const response = new TFTPResponse(init)
+	responseLogSources.set(response, source)
+	return response
 }
 
 function routeMatchesMethod(
