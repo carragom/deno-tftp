@@ -132,7 +132,6 @@ export interface ServerOptions {
 export class Server {
 	#options: NormalizedServerOptions
 	#handler?: TFTPRequestHandler
-	#defaultHandler?: TFTPRequestHandler
 	#rootReal?: string
 	#socket?: UdpConn
 	#loop?: Promise<void>
@@ -148,11 +147,9 @@ export class Server {
 	constructor(
 		options: ServerOptions = {},
 		handler?: TFTPRequestHandler,
-		defaultHandler?: TFTPRequestHandler,
 	) {
 		this.#options = normalizeServerOptions(options)
 		this.#handler = handler
-		this.#defaultHandler = defaultHandler
 	}
 
 	/** Bound hostname. Reflects the active socket after {@link listen}. */
@@ -322,15 +319,6 @@ export class Server {
 			) {
 				return response
 			}
-		}
-
-		if (this.#defaultHandler) {
-			return normalizeResponse(
-				await this.#defaultHandler(
-					normalizedRequest,
-					info,
-				),
-			)
 		}
 
 		return new TFTPResponse({
