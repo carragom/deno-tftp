@@ -1,11 +1,9 @@
 {
-	"name": "deno-tftp",
-	"version": "0.1.0",
+	"name": "@carragom/deno-tftp",
+	"version": "1.0.0-alpha.1",
 	"license": "MIT",
 	"lock": false,
-	"exports": {
-		".": "./mod.ts"
-	},
+	"exports": { ".": "./mod.ts" },
 	"unstable": [
 		"net"
 	],
